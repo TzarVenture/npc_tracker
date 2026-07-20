@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Advertiser Test Page</title>
+</head>
+<body>
+  <h1>Advertiser Test Page</h1>
+  <p>Check the network tab to see if the tracking pixel fires.</p>
+  
+  <!-- Add a test script for an offer ID that we can generate in the DB -->
+  <script>
+    // Mock the backend offer ID
+    const offerId = 'test-offer-123';
+    
+    // We would fetch the real script from the backend like this:
+    const script = document.createElement('script');
+    script.src = 'http://localhost:3000/api/script/' + offerId + '.js';
+    document.head.appendChild(script);
+  </script>
+</body>
+</html>

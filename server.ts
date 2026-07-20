@@ -105,7 +105,7 @@ const getGeoFromIp = (ip: string) => {
     return { country: "US", city: "Localhost" }; // Default simulation local to US
   }
   const geo = geoip.lookup(cleanIp);
-  return { 
+  return {
     country: geo ? geo.country : "Unknown",
     city: (geo && geo.city) ? geo.city : "Unknown"
   };
@@ -213,11 +213,11 @@ app.delete("/api/offers/:id", (req, res) => {
 app.get("/api/stats", (req, res) => {
   const totalOffers = db.offers.length;
   const activeOffers = db.offers.filter(o => o.status === "active").length;
-  
+
   const totalClicks = db.clicks.length;
   const filteredTraffic = db.clicks.filter(c => ["filtered", "capped", "blocked"].includes(c.status)).length;
   const passedTraffic = db.clicks.filter(c => c.status === "passed").length;
-  
+
   // Sum revenue of passed clicks
   const totalRevenue = db.clicks.reduce((acc, c) => acc + (c.status === "passed" ? c.revenue : 0), 0);
 
@@ -244,7 +244,7 @@ app.get("/api/clicks", (req, res) => {
   const limit = parseInt(req.query.limit as string) || 20;
   const startIndex = (page - 1) * limit;
   const endIndex = page * limit;
-  
+
   const results = db.clicks.slice(startIndex, endIndex);
   res.json({
     total: db.clicks.length,
