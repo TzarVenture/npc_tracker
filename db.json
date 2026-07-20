@@ -1,0 +1,180 @@
+{
+  "offers": [
+    {
+      "_id": "off-s9moen4",
+      "name": "adidas promo",
+      "destinationUrl": "adidas.com",
+      "fallbackUrl": "google.com",
+      "payout": 4.5,
+      "revenue": 12,
+      "geoTargeting": [
+        "US"
+      ],
+      "cityTargeting": [
+        "NEW YORK"
+      ],
+      "deviceType": "All",
+      "osType": "All",
+      "browserTargeting": [
+        "CHROME"
+      ],
+      "ispTargeting": [],
+      "dailyCap": 0,
+      "actionOnFilter": "redirect",
+      "blockBots": true,
+      "status": "active",
+      "clickCount": 0,
+      "createdAt": "2026-07-15T11:42:07.946Z"
+    },
+    {
+      "_id": "off-5efmts3",
+      "name": "Adidas test 2",
+      "destinationUrl": "ngf",
+      "fallbackUrl": "https://djljfd.com",
+      "payout": 4.5,
+      "revenue": 12,
+      "geoTargeting": [
+        "US"
+      ],
+      "cityTargeting": [
+        "MUMBAI"
+      ],
+      "deviceType": "All",
+      "osType": "All",
+      "browserTargeting": [
+        "CHROME"
+      ],
+      "ispTargeting": [
+        "AT"
+      ],
+      "dailyCap": 0,
+      "actionOnFilter": "redirect",
+      "blockBots": true,
+      "status": "active",
+      "clickCount": 0,
+      "createdAt": "2026-07-11T13:41:56.313Z"
+    },
+    {
+      "_id": "off-ueytvdo",
+      "name": "Adidas Test",
+      "destinationUrl": "https://osgns.com",
+      "fallbackUrl": "https://osgns.com",
+      "payout": 4.5,
+      "revenue": 12,
+      "geoTargeting": [
+        "US"
+      ],
+      "cityTargeting": [
+        "MUMBAI"
+      ],
+      "deviceType": "All",
+      "osType": "All",
+      "browserTargeting": [
+        "CHROME"
+      ],
+      "ispTargeting": [
+        "AT"
+      ],
+      "dailyCap": 0,
+      "actionOnFilter": "redirect",
+      "blockBots": true,
+      "status": "active",
+      "clickCount": 0,
+      "createdAt": "2026-07-11T13:40:19.488Z"
+    }
+  ],
+  "clicks": [
+    {
+      "_id": "click-fr5sq2h",
+      "offerId": "off-s9moen4",
+      "pubId": "AFF-PRO-88",
+      "subId1": "social_promo",
+      "subId2": "tracker_test",
+      "ip": "192.168.12.34",
+      "country": "US",
+      "city": "Localhost",
+      "device": "Mobile",
+      "os": "iOS",
+      "browser": "Safari",
+      "isp": "Unknown ISP",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1",
+      "status": "filtered",
+      "revenue": 0,
+      "timestamp": "2026-07-20T11:41:23.791Z"
+    },
+    {
+      "_id": "click-02htweb",
+      "offerId": "off-5efmts3",
+      "pubId": "AFF-PRO-88",
+      "subId1": "social_promo",
+      "subId2": "tracker_test",
+      "ip": "192.168.12.34",
+      "country": "IN",
+      "city": "Localhost",
+      "device": "Desktop",
+      "os": "Windows",
+      "browser": "Chrome",
+      "isp": "Unknown ISP",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+      "status": "filtered",
+      "revenue": 0,
+      "timestamp": "2026-07-11T13:56:36.458Z"
+    },
+    {
+      "_id": "click-y1j9s4a",
+      "offerId": "off-5efmts3",
+      "pubId": "AFF-PRO-88",
+      "subId1": "social_promo",
+      "subId2": "tracker_test",
+      "ip": "192.168.12.34",
+      "country": "US",
+      "city": "Localhost",
+      "device": "Desktop",
+      "os": "Windows",
+      "browser": "Chrome",
+      "isp": "Unknown ISP",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+      "status": "filtered",
+      "revenue": 0,
+      "timestamp": "2026-07-11T13:56:03.772Z"
+    },
+    {
+      "_id": "click-oxfjncu",
+      "offerId": "off-5efmts3",
+      "pubId": "AFF-PRO-88",
+      "subId1": "social_promo",
+      "subId2": "tracker_test",
+      "ip": "192.168.12.34",
+      "country": "US",
+      "city": "Localhost",
+      "device": "Desktop",
+      "os": "macOS",
+      "browser": "Safari",
+      "isp": "Unknown ISP",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
+      "status": "filtered",
+      "revenue": 0,
+      "timestamp": "2026-07-11T13:55:24.196Z"
+    },
+    {
+      "_id": "click-o300sas",
+      "offerId": "off-5efmts3",
+      "pubId": "AFF-PRO-88",
+      "subId1": "social_promo",
+      "subId2": "tracker_test",
+      "ip": "192.168.12.34",
+      "country": "IN",
+      "city": "Localhost",
+      "device": "Desktop",
+      "os": "macOS",
+      "browser": "Safari",
+      "isp": "Unknown ISP",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
+      "status": "filtered",
+      "revenue": 0,
+      "timestamp": "2026-07-11T13:54:21.620Z"
+    }
+  ],
+  "globalTracking": true,
+  "blacklist": []
+}

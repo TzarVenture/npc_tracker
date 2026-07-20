@@ -1,0 +1,6 @@
+{
+  "name": "NPC_tracker",
+  "description": "Enterprise-grade full-stack retargeting traffic controller and real-time analytics platform with dynamic routing, bot protection, and live click-stream analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
