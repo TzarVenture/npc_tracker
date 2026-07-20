@@ -16,6 +16,9 @@ export interface Offer {
   dailyCap: number;
   actionOnFilter: 'redirect' | 'block' | 'log' | 'drop';
   blockBots: boolean;
+  triggerDelayMs?: number;
+  frequencyCap?: 'unlimited' | 'once_per_session' | 'once_per_user';
+  targetPages?: string[];
   status: 'active' | 'paused';
   clickCount: number;
   createdAt: string;
