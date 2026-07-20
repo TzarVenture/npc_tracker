@@ -21,7 +21,21 @@ export interface Offer {
   targetPages?: string[];
   status: 'active' | 'paused';
   clickCount: number;
+  totalConversions?: number;
+  conversionRate?: number;
   createdAt: string;
+}
+
+export interface Conversion {
+  _id: string;
+  clickId: string;
+  offerId: string;
+  pubId?: string;
+  subId1?: string;
+  subId2?: string;
+  revenue: number;
+  payout: number;
+  timestamp: string;
 }
 
 export interface Click {
@@ -47,6 +61,8 @@ export interface DashboardStats {
   totalOffers: number;
   activeOffers: number;
   totalClicks: number;
+  totalConversions?: number;
+  conversionRate?: number;
   filteredTraffic: number;
   passedTraffic: number;
   totalRevenue: number;

@@ -47,6 +47,8 @@ export default function Dashboard() {
     totalClicks: 0,
     filteredTraffic: 0,
     passedTraffic: 0,
+    totalConversions: 0,
+    conversionRate: 0,
     totalRevenue: 0
   });
 
@@ -199,8 +201,8 @@ export default function Dashboard() {
     );
   }
 
-  // Calculate stats conversion rate
-  const conversionRate = stats.totalClicks > 0 
+  // Calculate stats pass rate
+  const passRate = stats.totalClicks > 0 
     ? ((stats.passedTraffic / stats.totalClicks) * 100).toFixed(1) 
     : "100";
 
@@ -237,8 +239,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Metric Cards - 4 Columns */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Metric Cards - 5 Columns */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
           <div>
             <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center justify-between">
@@ -262,8 +264,24 @@ export default function Dashboard() {
             <div className="text-3xl font-bold text-slate-900">{stats.passedTraffic.toLocaleString()}</div>
           </div>
           <div className="text-emerald-600 text-xs mt-3 flex items-center font-medium">
-            <span className="bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-semibold mr-1.5">{conversionRate}%</span>
+            <span className="bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-semibold mr-1.5">{passRate}%</span>
             Passed routing policy
+          </div>
+        </div>
+
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center justify-between">
+              Total Conversions
+              <Zap size={14} className="text-indigo-500" />
+            </div>
+            <div className="text-3xl font-bold text-slate-900">{stats.totalConversions?.toLocaleString() || 0}</div>
+          </div>
+          <div className="text-indigo-600 text-xs mt-3 flex items-center font-medium">
+            <span className="bg-indigo-50 px-2 py-0.5 rounded text-[10px] font-semibold mr-1.5">
+              {stats.conversionRate?.toFixed(2) || "0.00"}%
+            </span>
+            Conversion Rate (CR%)
           </div>
         </div>
 
@@ -295,9 +313,9 @@ export default function Dashboard() {
           </div>
           <div className="text-amber-600 text-xs mt-3 flex items-center font-medium">
             <span className="bg-amber-50 px-2 py-0.5 rounded text-[10px] font-semibold mr-1.5">
-              ${stats.passedTraffic > 0 ? (stats.totalRevenue / stats.passedTraffic).toFixed(2) : "0.00"}
+              ${stats.totalConversions && stats.totalConversions > 0 ? (stats.totalRevenue / stats.totalConversions).toFixed(2) : "0.00"}
             </span>
-            Average payout per click
+            Average payout per conversion
           </div>
         </div>
       </div>
