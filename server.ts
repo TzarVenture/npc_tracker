@@ -5,7 +5,7 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import geoip from "geoip-lite";
-import { Offer, Click } from "./src/types";
+import { Offer, Click, Conversion } from "./src/types";
 
 const app = express();
 const PORT = 3000;
@@ -18,11 +18,13 @@ app.use(express.json());
 let db: {
   offers: Offer[];
   clicks: Click[];
+  conversions: Conversion[];
   globalTracking: boolean;
   blacklist: string[];
 } = {
   offers: [],
   clicks: [],
+  conversions: [],
   globalTracking: true,
   blacklist: []
 };
@@ -35,6 +37,7 @@ const loadDB = () => {
       db = {
         offers: parsed.offers || [],
         clicks: parsed.clicks || [],
+        conversions: parsed.conversions || [],
         globalTracking: parsed.globalTracking !== false,
         blacklist: parsed.blacklist || []
       };
@@ -175,9 +178,11 @@ app.post("/api/offers", (req, res) => {
     ispTargeting: ispTargeting || [],
     dailyCap: Number(dailyCap) || 0,
     actionOnFilter: actionOnFilter || "redirect",
-    blockBots: blockBots !== false,
+    targetPages: Array.isArray(targetPages) ? targetPages : [],
     status: "active",
     clickCount: 0,
+    totalConversions: 0,
+    conversionRate: 0,
     createdAt: new Date().toISOString()
   };
 
@@ -205,8 +210,58 @@ app.delete("/api/offers/:id", (req, res) => {
   const { id } = req.params;
   db.offers = db.offers.filter(o => o._id !== id);
   db.clicks = db.clicks.filter(c => c.offerId !== id);
+  db.conversions = db.conversions.filter(c => c.offerId !== id);
   saveDB();
   res.json({ success: true, message: "Campaign deleted successfully." });
+});
+
+// GET Postback / Conversion Tracking
+app.get("/api/postback", (req, res) => {
+  const { click_id, payout, revenue } = req.query;
+
+  if (!click_id) {
+    return res.status(400).json({ error: "Missing click_id parameter" });
+  }
+
+  // Check if click exists
+  const click = db.clicks.find(c => c._id === click_id);
+  if (!click) {
+    return res.status(404).json({ error: "Click not found" });
+  }
+
+  // Check if already converted
+  const existingConv = db.conversions.find(c => c.clickId === click_id);
+  if (existingConv) {
+    return res.status(409).json({ error: "Conversion already recorded for this click" });
+  }
+
+  // Create conversion
+  const offer = db.offers.find(o => o._id === click.offerId);
+  const convRevenue = revenue ? Number(revenue) : (offer ? offer.revenue : 0);
+  const convPayout = payout ? Number(payout) : (offer ? offer.payout : 0);
+
+  const newConv: Conversion = {
+    _id: "conv-" + Math.random().toString(36).substring(2, 9),
+    clickId: click._id as string,
+    offerId: click.offerId,
+    pubId: click.pubId,
+    subId1: click.subId1,
+    subId2: click.subId2,
+    revenue: convRevenue,
+    payout: convPayout,
+    timestamp: new Date().toISOString()
+  };
+
+  db.conversions.unshift(newConv);
+
+  // Update offer stats
+  if (offer) {
+    offer.totalConversions = (offer.totalConversions || 0) + 1;
+    offer.conversionRate = offer.clickCount > 0 ? (offer.totalConversions / offer.clickCount) * 100 : 0;
+  }
+
+  saveDB();
+  res.json({ success: true, message: "Conversion recorded", conversion: newConv });
 });
 
 // Aggregated Stats
@@ -218,8 +273,11 @@ app.get("/api/stats", (req, res) => {
   const filteredTraffic = db.clicks.filter(c => ["filtered", "capped", "blocked"].includes(c.status)).length;
   const passedTraffic = db.clicks.filter(c => c.status === "passed").length;
 
-  // Sum revenue of passed clicks
-  const totalRevenue = db.clicks.reduce((acc, c) => acc + (c.status === "passed" ? c.revenue : 0), 0);
+  const totalConversions = db.conversions.length;
+  const conversionRate = passedTraffic > 0 ? (totalConversions / passedTraffic) * 100 : 0;
+
+  // Revenue should primarily come from conversions in CPA tracking
+  const totalRevenue = db.conversions.reduce((acc, c) => acc + c.revenue, 0);
 
   res.json({
     totalOffers,
@@ -227,6 +285,8 @@ app.get("/api/stats", (req, res) => {
     totalClicks,
     filteredTraffic,
     passedTraffic,
+    totalConversions,
+    conversionRate,
     totalRevenue
   });
 });
@@ -248,6 +308,22 @@ app.get("/api/clicks", (req, res) => {
   const results = db.clicks.slice(startIndex, endIndex);
   res.json({
     total: db.clicks.length,
+    page,
+    limit,
+    data: results
+  });
+});
+
+// Paginated Conversions Endpoint
+app.get("/api/conversions", (req, res) => {
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+  const startIndex = (page - 1) * limit;
+  const endIndex = page * limit;
+
+  const results = db.conversions.slice(startIndex, endIndex);
+  res.json({
+    total: db.conversions.length,
     page,
     limit,
     data: results

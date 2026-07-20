@@ -283,8 +283,15 @@ export default function Offers() {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <div className="font-bold text-slate-900">{offer.clickCount.toLocaleString()}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">Rev: <span className="font-semibold text-emerald-600">${(offer.clickCount * offer.revenue).toLocaleString()}</span></div>
+                      <div className="font-bold text-slate-900">
+                        {offer.clickCount.toLocaleString()} <span className="text-[10px] text-slate-400 ml-1 font-medium">Clicks</span>
+                      </div>
+                      <div className="font-bold text-slate-900 mt-1">
+                        {offer.totalConversions?.toLocaleString() || 0} <span className="text-[10px] text-indigo-500 ml-1 font-medium">Convs</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-1">
+                        CR: <span className="font-semibold text-indigo-600">{offer.conversionRate?.toFixed(2) || "0.00"}%</span> | Rev: <span className="font-semibold text-emerald-600">${(offer.totalConversions ? offer.totalConversions * offer.revenue : 0).toLocaleString()}</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="font-semibold text-slate-800">
