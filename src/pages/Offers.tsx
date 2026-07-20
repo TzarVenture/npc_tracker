@@ -417,14 +417,7 @@ export default function Offers() {
                     value={formData.destinationUrl}
                     onChange={(e) => setFormData({ ...formData, destinationUrl: e.target.value })}
                   />
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input
-                      label="Payout ($)"
-                      type="number"
-                      step="0.01"
-                      value={formData.revenue}
-                      onChange={(e) => setFormData({ ...formData, revenue: parseFloat(e.target.value) || 0 })}
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Select
                       label="Status"
                       value={formData.status}

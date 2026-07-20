@@ -17,7 +17,8 @@ import {
   Layers,
   ArrowUpDown,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Copy
 } from "lucide-react";
 import { Click, Offer } from "../types";
 
@@ -35,6 +36,13 @@ export default function Reports() {
   const [search, setSearch] = useState("");
   const [selectedOffer, setSelectedOffer] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("all");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -231,7 +239,16 @@ export default function Reports() {
                   return (
                     <tr key={c._id} className="hover:bg-slate-50/40 transition-colors">
                       <td className="px-6 py-4 font-mono text-xs text-indigo-600 font-bold">
-                        {c._id.substring(0, 10)}...
+                        <div className="flex items-center gap-2">
+                          <span className="truncate w-24 select-all" title={c._id}>{c._id}</span>
+                          <button 
+                            onClick={() => copyToClipboard(c._id, c._id)}
+                            className="p-1 hover:bg-indigo-50 rounded text-indigo-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                            title="Copy Click ID"
+                          >
+                            {copiedId === c._id ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                          </button>
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-slate-600 text-xs">
                         {formattedTime}
