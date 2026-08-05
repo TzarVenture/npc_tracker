@@ -23,7 +23,7 @@ export default function Filters() {
       const res = await axios.get("/api/blacklist");
       setBlacklist(res.data);
     } catch (err) {
-      console.error("Failed to fetch blacklist", err);
+      // Quiet fail
     }
   };
 
@@ -35,7 +35,7 @@ export default function Filters() {
       setBlacklist(res.data);
       setNewIp("");
     } catch (err) {
-      console.error("Failed to add IP", err);
+      // Quiet fail
     }
   };
 
@@ -44,7 +44,7 @@ export default function Filters() {
       const res = await axios.delete(`/api/blacklist/${encodeURIComponent(ip)}`);
       setBlacklist(res.data);
     } catch (err) {
-      console.error("Failed to remove IP", err);
+      // Quiet fail
     }
   };
 

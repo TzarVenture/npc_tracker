@@ -1,31 +1,27 @@
-/* Offers.tsx: Campaign management, filtering rules, and integration codes. */
+/* Offers.tsx: Campaign management, filtering rules, multi-event payouts, scheduling, and integration code generators. */
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Input, Select } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
-import { Switch } from "../components/ui/Switch";
 import {
   Plus,
   Search,
-  Filter,
   CheckCircle2,
-  Circle,
   Link2,
   Copy,
-  Play,
-  Pause,
-  ChevronRight,
-  ChevronLeft,
   Trash2,
   Edit,
   X,
   ExternalLink,
   Info,
-  Code
+  Code,
+  Calendar,
+  Layers,
+  Clock
 } from "lucide-react";
-import { Offer } from "../types";
+import { Offer, OfferEvent } from "../types";
 
 export default function Offers() {
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -34,6 +30,7 @@ export default function Offers() {
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [selectedOfferForCode, setSelectedOfferForCode] = useState<Offer | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -49,10 +46,23 @@ export default function Offers() {
     browserTargeting: "",
     ispTargeting: "",
     dailyCap: 0,
+    hourlyCap: 0,
+    startDate: "",
+    endDate: "",
+    duplicateWindowMinutes: 0,
+    eventsList: [] as OfferEvent[],
     actionOnFilter: "redirect" as "redirect" | "block" | "log" | "drop",
     blockBots: true,
+    targetPages: "",
+    triggerDelayMs: 0,
+    triggerIntervalMs: 0,
+    triggerRepeatCount: 0,
+    frequencyCap: "unlimited" as "unlimited" | "once_per_session" | "once_per_user",
     status: "active" as "active" | "paused"
   });
+
+  // Event creation temporary form state
+  const [newEvent, setNewEvent] = useState({ eventName: "", payout: 0, revenue: 0 });
 
   useEffect(() => {
     fetchOffers();
@@ -63,7 +73,7 @@ export default function Offers() {
       const res = await axios.get("/api/offers");
       setOffers(res.data);
     } catch (err) {
-      console.error("Failed to fetch campaigns:", err);
+      // Quiet fail if error
     }
   };
 
@@ -89,8 +99,18 @@ export default function Offers() {
       browserTargeting: parseCSV(formData.browserTargeting),
       ispTargeting: parseCSV(formData.ispTargeting),
       dailyCap: Number(formData.dailyCap) || 0,
+      hourlyCap: Number(formData.hourlyCap) || 0,
+      startDate: formData.startDate || null,
+      endDate: formData.endDate || null,
+      duplicateWindowMinutes: Number(formData.duplicateWindowMinutes) || 0,
+      events: formData.eventsList,
       actionOnFilter: formData.actionOnFilter,
       blockBots: formData.blockBots,
+      targetPages: parseCSV(formData.targetPages),
+      triggerDelayMs: Number(formData.triggerDelayMs) || 0,
+      triggerIntervalMs: Number(formData.triggerIntervalMs) || 0,
+      triggerRepeatCount: Number(formData.triggerRepeatCount) || 0,
+      frequencyCap: formData.frequencyCap,
       status: formData.status
     };
 
@@ -103,7 +123,7 @@ export default function Offers() {
       closeDrawer();
       fetchOffers();
     } catch (err) {
-      console.error("Error creating/updating campaign:", err);
+      // Quiet fail
     }
   };
 
@@ -121,9 +141,19 @@ export default function Offers() {
       osType: offer.osType,
       browserTargeting: (offer.browserTargeting || []).join(", "),
       ispTargeting: (offer.ispTargeting || []).join(", "),
-      dailyCap: offer.dailyCap,
+      dailyCap: offer.dailyCap || 0,
+      hourlyCap: offer.hourlyCap || 0,
+      startDate: offer.startDate ? offer.startDate.substring(0, 16) : "",
+      endDate: offer.endDate ? offer.endDate.substring(0, 16) : "",
+      duplicateWindowMinutes: offer.duplicateWindowMinutes || 0,
+      eventsList: offer.events || [],
       actionOnFilter: offer.actionOnFilter,
       blockBots: offer.blockBots,
+      targetPages: (offer.targetPages || []).join(", "),
+      triggerDelayMs: offer.triggerDelayMs || 0,
+      triggerIntervalMs: offer.triggerIntervalMs || 0,
+      triggerRepeatCount: offer.triggerRepeatCount || 0,
+      frequencyCap: offer.frequencyCap || "unlimited",
       status: offer.status
     });
     setCurrentStep(1);
@@ -136,18 +166,24 @@ export default function Offers() {
       await axios.delete(`/api/offers/${id}`);
       fetchOffers();
     } catch (err) {
-      console.error("Error deleting campaign:", err);
+      // Quiet fail
     }
   };
 
-  const handleToggleStatus = async (offer: Offer) => {
-    const newStatus = offer.status === "active" ? "paused" : "active";
-    try {
-      await axios.put(`/api/offers/${offer._id}`, { status: newStatus });
-      fetchOffers();
-    } catch (err) {
-      console.error("Error toggling campaign status:", err);
-    }
+  const handleAddEvent = () => {
+    if (!newEvent.eventName.trim()) return;
+    setFormData(prev => ({
+      ...prev,
+      eventsList: [...prev.eventsList, { eventName: newEvent.eventName.trim(), payout: Number(newEvent.payout) || 0, revenue: Number(newEvent.revenue) || 0 }]
+    }));
+    setNewEvent({ eventName: "", payout: 0, revenue: 0 });
+  };
+
+  const handleRemoveEvent = (idx: number) => {
+    setFormData(prev => ({
+      ...prev,
+      eventsList: prev.eventsList.filter((_, i) => i !== idx)
+    }));
   };
 
   const closeDrawer = () => {
@@ -167,8 +203,18 @@ export default function Offers() {
       browserTargeting: "",
       ispTargeting: "",
       dailyCap: 0,
+      hourlyCap: 0,
+      startDate: "",
+      endDate: "",
+      duplicateWindowMinutes: 0,
+      eventsList: [],
       actionOnFilter: "redirect",
       blockBots: true,
+      targetPages: "",
+      triggerDelayMs: 0,
+      triggerIntervalMs: 0,
+      triggerRepeatCount: 0,
+      frequencyCap: "unlimited",
       status: "active"
     });
   };
@@ -187,20 +233,24 @@ export default function Offers() {
     o.destinationUrl.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const getTrackingUrl = (offerId: string) => `${window.location.origin}/track?offer_id=${offerId}&pub_id={pub_id}&sub_id1={sub_id1}`;
+  const getPostbackUrl = (offerId: string) => `${window.location.origin}/api/postback?click_id={click_id}&revenue=10&payout=5`;
+  const getScriptTag = (offerId: string) => `<script src="${window.location.origin}/api/script/${offerId}.js" async></script>`;
+
   return (
     <div className="space-y-6 animate-fadeIn">
       {/* Header section */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Campaigns</h2>
-          <p className="text-sm text-slate-500">Manage tracking links, integrations, and targeting rules.</p>
+          <p className="text-sm text-slate-500">Manage tracking links, multi-event payouts, and targeting controls.</p>
         </div>
         <Button onClick={() => setShowDrawer(true)} className="gap-2 shadow-sm cursor-pointer">
           <Plus size={16} /> New Campaign
         </Button>
       </header>
 
-      {/* Campaign List Card */}
+      {/* Campaign List Table */}
       <Card className="flex flex-col overflow-hidden">
         <CardHeader className="bg-slate-50/50">
           <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -223,9 +273,9 @@ export default function Offers() {
               <tr>
                 <th className="px-6 py-4">Campaign</th>
                 <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Targeting</th>
-                <th className="px-6 py-4 text-right">Metrics</th>
-                <th className="px-6 py-4 text-right">Action Rule</th>
+                <th className="px-6 py-4">Caps & Schedule</th>
+                <th className="px-6 py-4 text-right">Metrics & Events</th>
+                <th className="px-6 py-4 text-center">Integration Code</th>
                 <th className="px-6 py-4 text-center">Manage</th>
               </tr>
             </thead>
@@ -264,86 +314,54 @@ export default function Offers() {
                       </Badge>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-bold text-slate-400 uppercase tracking-tight">Geo:</span>
-                          {offer.geoTargeting && offer.geoTargeting.length > 0 ? (
-                            <span className="text-[10px] bg-slate-100 border border-slate-200 text-slate-600 px-1.5 py-0.2 rounded font-semibold uppercase">
-                              {offer.geoTargeting.join(", ")}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] bg-emerald-50 border border-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded font-semibold">
-                              ALL
-                            </span>
-                          )}
+                      <div className="space-y-1 text-xs text-slate-600">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-[10px] text-slate-400 uppercase">Caps:</span>
+                          <span>Daily: {offer.dailyCap || "∞"} | Hourly: {offer.hourlyCap || "∞"}</span>
                         </div>
-                        <div className="text-[10px] text-slate-500 font-medium">
-                          {offer.deviceType} / {offer.osType}
-                        </div>
+                        {offer.startDate && (
+                          <div className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
+                            <Clock size={10} /> {new Date(offer.startDate).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <div className="font-bold text-slate-900">
-                        {offer.clickCount.toLocaleString()} <span className="text-[10px] text-slate-400 ml-1 font-medium">Clicks</span>
-                      </div>
-                      <div className="font-bold text-slate-900 mt-1">
-                        {offer.totalConversions?.toLocaleString() || 0} <span className="text-[10px] text-indigo-500 ml-1 font-medium">Convs</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500 mt-1">
-                        CR: <span className="font-semibold text-indigo-600">{offer.conversionRate?.toFixed(2) || "0.00"}%</span> | Rev: <span className="font-semibold text-emerald-600">${(offer.totalConversions ? offer.totalConversions * offer.revenue : 0).toLocaleString()}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="font-semibold text-slate-800">
-                        {offer.dailyCap === 0 ? "No Cap" : `${offer.dailyCap}/day`}
-                      </div>
-                      <div className="text-[10px] text-slate-500 uppercase font-bold tracking-tight mt-0.5">
-                        Filter: <span className="font-semibold text-indigo-600">{offer.actionOnFilter}</span>
+                      <div className="font-bold text-slate-900">${offer.revenue.toFixed(2)} Rev / ${offer.payout.toFixed(2)} Pay</div>
+                      <div className="text-[10px] text-slate-500 font-medium">
+                        {offer.events && offer.events.length > 0 ? (
+                          <span className="text-indigo-600 font-bold">{offer.events.length} Custom Event Tiers</span>
+                        ) : (
+                          "Default Single Payout"
+                        )}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setEditingOfferId(offer._id);
-                            setCurrentStep(4);
-                            setShowDrawer(true);
-                          }}
-                          className="h-8 w-8 p-0"
-                          title="View Integration Code"
-                        >
-                          <Code size={14} className="text-slate-500 hover:text-indigo-600" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleToggleStatus(offer)}
-                          className="h-8 w-8 p-0"
-                        >
-                          {offer.status === "active" ? (
-                            <Pause size={14} className="text-amber-500" />
-                          ) : (
-                            <Play size={14} className="text-emerald-500" />
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
+                    <td className="px-6 py-4 text-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedOfferForCode(offer)}
+                        className="gap-1.5 text-xs text-indigo-700 bg-indigo-50 border-indigo-100 hover:bg-indigo-100"
+                      >
+                        <Code size={13} /> Get Links & Pixel
+                      </Button>
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
                           onClick={() => handleEditClick(offer)}
-                          className="h-8 w-8 p-0"
+                          className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Edit Campaign"
                         >
-                          <Edit size={14} className="text-indigo-600" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
+                          <Edit size={16} />
+                        </button>
+                        <button
                           onClick={() => handleDeleteOffer(offer._id)}
-                          className="h-8 w-8 p-0 hover:bg-rose-50"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          title="Delete Campaign"
                         >
-                          <Trash2 size={14} className="text-rose-500" />
-                        </Button>
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -354,247 +372,310 @@ export default function Offers() {
         </div>
       </Card>
 
-      {/* Multi-step Campaign Creator Drawer */}
-      {showDrawer && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="fixed inset-0 bg-slate-950/45 backdrop-blur-sm transition-opacity" onClick={closeDrawer}></div>
-          <div className="w-full max-w-2xl bg-white border-l border-slate-200 h-full relative z-10 flex flex-col shadow-2xl animate-slideLeft">
-            
-            {/* Header */}
-            <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+      {/* Integration Links Modal */}
+      {selectedOfferForCode && (
+        <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <Card className="max-w-2xl w-full bg-white shadow-2xl animate-fadeIn">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100 pb-4">
               <div>
-                <h3 className="text-xl font-bold text-slate-900">
-                  {editingOfferId && currentStep === 4 ? "Integration Setup" : editingOfferId ? "Edit Campaign" : "New Campaign"}
-                </h3>
-                <p className="text-sm text-slate-500 mt-1">Configure targeting rules and grab your tracking code.</p>
+                <CardTitle className="text-base text-slate-900">Integration Snippets: {selectedOfferForCode.name}</CardTitle>
+                <p className="text-xs text-slate-500">Copy redirect URLs, JavaScript pixels, and S2S Postbacks.</p>
               </div>
-              <button
-                className="text-slate-400 hover:text-slate-900 p-2 rounded-full hover:bg-slate-100 cursor-pointer"
-                onClick={closeDrawer}
-              >
+              <button onClick={() => setSelectedOfferForCode(null)} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+                <X size={18} />
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-6 pt-4 text-xs">
+              {/* Redirect Link */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">1. Link Redirect URL (For Affiliates/Publishers)</label>
+                <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <span className="font-mono flex-1 truncate text-slate-800">{getTrackingUrl(selectedOfferForCode._id)}</span>
+                  <button
+                    onClick={() => copyToClipboard(getTrackingUrl(selectedOfferForCode._id), "link")}
+                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                  >
+                    {copiedId === "link" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                  </button>
+                </div>
+              </div>
+
+              {/* JS Pixel Embed */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">2. Client-Side JavaScript Pixel Script</label>
+                <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <span className="font-mono flex-1 truncate text-slate-800">{getScriptTag(selectedOfferForCode._id)}</span>
+                  <button
+                    onClick={() => copyToClipboard(getScriptTag(selectedOfferForCode._id), "js")}
+                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                  >
+                    {copiedId === "js" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                  </button>
+                </div>
+              </div>
+
+              {/* S2S Postback URL */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">3. Server-to-Server (S2S) Postback URL (For Conversions)</label>
+                <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <span className="font-mono flex-1 truncate text-indigo-700">{getPostbackUrl(selectedOfferForCode._id)}</span>
+                  <button
+                    onClick={() => copyToClipboard(getPostbackUrl(selectedOfferForCode._id), "postback")}
+                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                  >
+                    {copiedId === "postback" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                  </button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Campaign Create/Edit Modal Drawer */}
+      {showDrawer && (
+        <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-50 flex justify-end">
+          <div className="bg-white w-full max-w-xl h-full flex flex-col shadow-2xl animate-fadeIn">
+            {/* Drawer Header */}
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-lg text-slate-900">
+                  {editingOfferId ? "Edit Campaign" : "Create New Campaign"}
+                </h3>
+                <p className="text-xs text-slate-500">Configure tracking parameters, rules, and schedules.</p>
+              </div>
+              <button onClick={closeDrawer} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg">
                 <X size={20} />
               </button>
             </div>
 
-            {/* Stepper */}
-            <div className="px-8 py-5 border-b border-slate-100 bg-white">
-              <div className="flex items-center justify-between relative">
-                <div className="absolute left-0 top-1/2 w-full h-0.5 bg-slate-100 -z-10 -translate-y-1/2"></div>
-                {[1, 2, 3, 4].map((step) => (
-                  <div key={step} className="flex flex-col items-center gap-1.5 bg-white px-2">
-                    <div
-                      className={`w-7 h-7 rounded-full flex items-center justify-center border-2 text-xs font-bold transition-all ${
-                        currentStep > step
-                          ? "bg-indigo-600 border-indigo-600 text-white"
-                          : currentStep === step
-                          ? "border-indigo-600 text-indigo-600 bg-indigo-50"
-                          : "border-slate-200 text-slate-400 bg-white"
-                      }`}
-                    >
-                      {currentStep > step ? <CheckCircle2 size={14} /> : step}
-                    </div>
-                    <span className={`text-[10px] uppercase font-bold tracking-wider ${currentStep >= step ? "text-slate-800" : "text-slate-400"}`}>
-                      {step === 1 ? "Details" : step === 2 ? "Filters" : step === 3 ? "Action" : "Integration"}
-                    </span>
-                  </div>
-                ))}
-              </div>
+            {/* Step Tabs Indicator */}
+            <div className="flex border-b border-slate-100 text-xs font-bold text-slate-500">
+              {["1. General", "2. Targeting", "3. Capping & Schedule", "4. Multi-Events"].map((title, i) => (
+                <button
+                  key={i}
+                  onClick={() => setCurrentStep(i + 1)}
+                  className={`flex-1 py-3 border-b-2 text-center transition-colors ${
+                    currentStep === i + 1 ? "border-indigo-600 text-indigo-600" : "border-transparent"
+                  }`}
+                >
+                  {title}
+                </button>
+              ))}
             </div>
 
-            {/* Form Content */}
-            <div className="flex-1 overflow-y-auto px-8 py-8 bg-slate-50/20">
+            {/* Form Steps */}
+            <form onSubmit={handleCreateOrUpdate} className="flex-1 overflow-y-auto p-6 space-y-6">
               {currentStep === 1 && (
-                <div className="space-y-6 animate-fadeIn">
+                <div className="space-y-4">
                   <Input
                     label="Campaign Name"
-                    placeholder="e.g. Adidas Promo"
+                    placeholder="e.g. Adidas Winter Sale 2026"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
                   />
                   <Input
                     label="Destination URL"
-                    placeholder="https://www.advertiser.com/offer"
+                    placeholder="https://advertiser.com/landing?pub={pub_id}&sub1={sub_id1}"
                     value={formData.destinationUrl}
                     onChange={(e) => setFormData({ ...formData, destinationUrl: e.target.value })}
+                    required
                   />
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Select
-                      label="Status"
-                      value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value as "active" | "paused" })}
-                      options={[
-                        { value: "active", label: "Active" },
-                        { value: "paused", label: "Paused" }
-                      ]}
+                  <Input
+                    label="Fallback URL (For Filtered Traffic)"
+                    placeholder="https://fallback.com/backup"
+                    value={formData.fallbackUrl}
+                    onChange={(e) => setFormData({ ...formData, fallbackUrl: e.target.value })}
+                  />
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input
+                      label="Default Revenue ($)"
+                      type="number"
+                      step="0.1"
+                      value={formData.revenue}
+                      onChange={(e) => setFormData({ ...formData, revenue: Number(e.target.value) })}
+                    />
+                    <Input
+                      label="Default Affiliate Payout ($)"
+                      type="number"
+                      step="0.1"
+                      value={formData.payout}
+                      onChange={(e) => setFormData({ ...formData, payout: Number(e.target.value) })}
                     />
                   </div>
+                  <Select
+                    label="Filter Violation Action"
+                    value={formData.actionOnFilter}
+                    onChange={(e) => setFormData({ ...formData, actionOnFilter: e.target.value as any })}
+                    options={[
+                      { value: "redirect", label: "Redirect to Fallback URL" },
+                      { value: "block", label: "Block with 403 Access Denied" },
+                      { value: "log", label: "Log click & proceed to destination" },
+                      { value: "drop", label: "Drop Pixel ping silently" }
+                    ]}
+                  />
                 </div>
               )}
 
               {currentStep === 2 && (
-                <div className="space-y-6 animate-fadeIn">
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input
-                      label="Countries (ISO-2, comma separated)"
-                      placeholder="e.g. US, CA, GB"
-                      value={formData.geoTargeting}
-                      onChange={(e) => setFormData({ ...formData, geoTargeting: e.target.value })}
-                    />
-                    <Input
-                      label="Cities (comma separated)"
-                      placeholder="e.g. New York, London"
-                      value={formData.cityTargeting}
-                      onChange={(e) => setFormData({ ...formData, cityTargeting: e.target.value })}
-                    />
-                  </div>
-
+                <div className="space-y-4">
+                  <Input
+                    label="Geo Country Codes (CSV)"
+                    placeholder="e.g. US, CA, GB (Leave blank for ALL)"
+                    value={formData.geoTargeting}
+                    onChange={(e) => setFormData({ ...formData, geoTargeting: e.target.value })}
+                  />
+                  <Input
+                    label="City Restrictions (CSV)"
+                    placeholder="e.g. NEW YORK, LONDON"
+                    value={formData.cityTargeting}
+                    onChange={(e) => setFormData({ ...formData, cityTargeting: e.target.value })}
+                  />
                   <div className="grid grid-cols-2 gap-4">
                     <Select
-                      label="Device"
+                      label="Device Restriction"
                       value={formData.deviceType}
-                      onChange={(e) => setFormData({ ...formData, deviceType: e.target.value as "All" | "Mobile" | "Desktop" })}
+                      onChange={(e) => setFormData({ ...formData, deviceType: e.target.value as any })}
                       options={[
-                        { value: "All", label: "All" },
-                        { value: "Mobile", label: "Mobile" },
-                        { value: "Desktop", label: "Desktop" }
+                        { value: "All", label: "All Devices" },
+                        { value: "Mobile", label: "Mobile Only" },
+                        { value: "Desktop", label: "Desktop Only" }
                       ]}
                     />
                     <Select
-                      label="OS"
+                      label="OS Restriction"
                       value={formData.osType}
-                      onChange={(e) => setFormData({ ...formData, osType: e.target.value as "All" | "iOS" | "Android" | "Windows" })}
+                      onChange={(e) => setFormData({ ...formData, osType: e.target.value as any })}
                       options={[
-                        { value: "All", label: "All" },
-                        { value: "iOS", label: "iOS" },
-                        { value: "Android", label: "Android" },
-                        { value: "Windows", label: "Windows" }
+                        { value: "All", label: "All Operating Systems" },
+                        { value: "iOS", label: "iOS Only" },
+                        { value: "Android", label: "Android Only" },
+                        { value: "Windows", label: "Windows Only" }
                       ]}
                     />
                   </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input
-                      label="Browsers (comma separated)"
-                      placeholder="e.g. Chrome, Safari, Edge"
-                      value={formData.browserTargeting}
-                      onChange={(e) => setFormData({ ...formData, browserTargeting: e.target.value })}
-                    />
-                    <Input
-                      label="ISP / Network"
-                      placeholder="e.g. Comcast, AT&T"
-                      value={formData.ispTargeting}
-                      onChange={(e) => setFormData({ ...formData, ispTargeting: e.target.value })}
-                    />
-                  </div>
+                  <Input
+                    label="Browser Restrictions (CSV)"
+                    placeholder="e.g. CHROME, SAFARI"
+                    value={formData.browserTargeting}
+                    onChange={(e) => setFormData({ ...formData, browserTargeting: e.target.value })}
+                  />
+                  <Input
+                    label="ISP Restrictions (CSV)"
+                    placeholder="e.g. VERIZON, COMCAST"
+                    value={formData.ispTargeting}
+                    onChange={(e) => setFormData({ ...formData, ispTargeting: e.target.value })}
+                  />
                 </div>
               )}
 
               {currentStep === 3 && (
-                <div className="space-y-6 animate-fadeIn">
-                  <Input
-                    label="Daily Click Cap (0 for unlimited)"
-                    type="number"
-                    value={formData.dailyCap}
-                    onChange={(e) => setFormData({ ...formData, dailyCap: parseInt(e.target.value) || 0 })}
-                  />
-
-                  <Select
-                    label="Filter Action"
-                    value={formData.actionOnFilter}
-                    onChange={(e) => setFormData({ ...formData, actionOnFilter: e.target.value as "redirect" | "block" | "log" | "drop" })}
-                    options={[
-                      { value: "redirect", label: "Redirect to Fallback" },
-                      { value: "block", label: "Block (HTTP 403)" },
-                      { value: "drop", label: "Drop (No tracking, stop API)" },
-                      { value: "log", label: "Log Only (Pass through)" }
-                    ]}
-                  />
-
-                  {formData.actionOnFilter === "redirect" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <Input
-                      label="Fallback URL"
-                      placeholder="https://backup-offer.com"
-                      value={formData.fallbackUrl}
-                      onChange={(e) => setFormData({ ...formData, fallbackUrl: e.target.value })}
+                      label="Daily Click Cap (0 = Unlimited)"
+                      type="number"
+                      value={formData.dailyCap}
+                      onChange={(e) => setFormData({ ...formData, dailyCap: Number(e.target.value) })}
                     />
-                  )}
-
-                  <div className="bg-slate-50 border border-slate-200/70 p-4 rounded-xl mt-4">
-                    <Switch
-                      label="Bot Protection"
-                      description="Block crawlers and scrapers."
-                      checked={formData.blockBots}
-                      onChange={(checked) => setFormData({ ...formData, blockBots: checked })}
+                    <Input
+                      label="Hourly Click Cap (0 = Unlimited)"
+                      type="number"
+                      value={formData.hourlyCap}
+                      onChange={(e) => setFormData({ ...formData, hourlyCap: Number(e.target.value) })}
                     />
                   </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input
+                      label="Campaign Start Date/Time"
+                      type="datetime-local"
+                      value={formData.startDate}
+                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                    />
+                    <Input
+                      label="Campaign End Date/Time"
+                      type="datetime-local"
+                      value={formData.endDate}
+                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                    />
+                  </div>
+                  <Input
+                    label="Duplicate IP Filter Window (Minutes)"
+                    type="number"
+                    placeholder="e.g. 15 (Blocks repeat clicks within 15 mins)"
+                    value={formData.duplicateWindowMinutes}
+                    onChange={(e) => setFormData({ ...formData, duplicateWindowMinutes: Number(e.target.value) })}
+                  />
                 </div>
               )}
 
               {currentStep === 4 && (
-                <div className="space-y-6 animate-fadeIn">
-                  {editingOfferId ? (
-                    <>
-                      <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl">
-                        <h4 className="text-sm font-bold text-indigo-900 mb-2">Option A: Redirect Link</h4>
-                        <p className="text-xs text-indigo-700 mb-3">Share this link directly. Traffic is evaluated on our server before reaching the destination.</p>
-                        <div className="flex items-center gap-2">
-                          <code className="flex-1 bg-white border border-indigo-200 p-2 rounded text-xs text-indigo-900 overflow-x-auto whitespace-nowrap">
-                            {window.location.origin}/track?offer_id={editingOfferId}&pub_id=AFF001
-                          </code>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={() => copyToClipboard(`${window.location.origin}/track?offer_id=${editingOfferId}&pub_id=AFF001`, "link")}
-                          >
-                            {copiedId === "link" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                          </Button>
-                        </div>
-                      </div>
+                <div className="space-y-4">
+                  <label className="font-bold text-slate-800 text-xs uppercase tracking-wider block">Multi-Event Conversion Tiers</label>
+                  <p className="text-xs text-slate-500">Configure different payout/revenue rates for events like Install, Lead, or Sale.</p>
 
-                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                        <h4 className="text-sm font-bold text-slate-900 mb-2">Option B: Client-Side Pixel (JS)</h4>
-                        <p className="text-xs text-slate-500 mb-3">Embed this on the target page for manual triggering (e.g. tracking specific page loads).</p>
-                        <div className="flex items-start gap-2">
-                          <code className="flex-1 bg-slate-900 p-3 rounded-lg text-xs text-emerald-400 font-mono whitespace-pre overflow-x-auto">
-                            {`<script \n  src="${window.location.origin}/pixel.js" \n  data-offer-id="${editingOfferId}"\n  data-pub-id="AFF001"\n  data-delay="2000">\n</script>`}
-                          </code>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={() => copyToClipboard(`<script src="${window.location.origin}/pixel.js" data-offer-id="${editingOfferId}" data-pub-id="AFF001" data-delay="2000"></script>`, "pixel")}
+                  <div className="grid grid-cols-3 gap-2 items-end bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <Input
+                      label="Event Name"
+                      placeholder="e.g. lead"
+                      value={newEvent.eventName}
+                      onChange={(e) => setNewEvent({ ...newEvent, eventName: e.target.value })}
+                    />
+                    <Input
+                      label="Payout ($)"
+                      type="number"
+                      step="0.1"
+                      value={newEvent.payout}
+                      onChange={(e) => setNewEvent({ ...newEvent, payout: Number(e.target.value) })}
+                    />
+                    <div className="flex gap-2">
+                      <Input
+                        label="Revenue ($)"
+                        type="number"
+                        step="0.1"
+                        value={newEvent.revenue}
+                        onChange={(e) => setNewEvent({ ...newEvent, revenue: Number(e.target.value) })}
+                      />
+                      <Button type="button" onClick={handleAddEvent} className="h-[42px] mt-auto">
+                        <Plus size={16} />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {formData.eventsList.length > 0 && (
+                    <div className="space-y-2 border border-slate-200 rounded-lg overflow-hidden text-xs">
+                      {formData.eventsList.map((ev, idx) => (
+                        <div key={idx} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100">
+                          <div>
+                            <span className="font-bold text-slate-900 uppercase">{ev.eventName}</span>
+                            <span className="text-slate-500 ml-2">Rev: ${ev.revenue} | Pay: ${ev.payout}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveEvent(idx)}
+                            className="p-1 text-rose-500 hover:bg-rose-50 rounded"
                           >
-                            {copiedId === "pixel" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                          </Button>
+                            <Trash2 size={14} />
+                          </button>
                         </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-center py-12 text-slate-500 text-sm">
-                      Save this campaign first to generate integration codes!
+                      ))}
                     </div>
                   )}
                 </div>
               )}
-            </div>
+            </form>
 
-            {/* Footer */}
-            <div className="px-8 py-5 border-t border-slate-200 bg-white flex justify-between items-center">
+            {/* Drawer Footer */}
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
               {currentStep > 1 ? (
-                <Button variant="outline" onClick={prevStep}>
-                  <ChevronLeft size={16} /> Back
-                </Button>
-              ) : (
-               <Button variant="ghost" onClick={closeDrawer}>Cancel</Button>
-              )}
+                <Button variant="outline" onClick={prevStep}>Previous</Button>
+              ) : <div />}
 
               {currentStep < 4 ? (
-                <Button onClick={nextStep}>
-                  Continue <ChevronRight size={16} />
-                </Button>
+                <Button onClick={nextStep}>Next Step</Button>
               ) : (
-                <Button onClick={handleCreateOrUpdate} variant="success">
-                  {editingOfferId ? "Save Changes" : "Launch Campaign"}
-                </Button>
+                <Button onClick={handleCreateOrUpdate} className="bg-indigo-600 hover:bg-indigo-500">Save Campaign</Button>
               )}
             </div>
           </div>

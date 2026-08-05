@@ -1,6 +1,7 @@
-/* App.tsx: Root application component managing layout and navigation routes. */
-import React, { useState } from "react";
-import { Routes, Route, Link, useLocation } from "react-router-dom";
+/* App.tsx: Root application component managing layout, protected authentication, and navigation routes. */
+import React, { useState, useEffect } from "react";
+import { Routes, Route, Link, useLocation, useNavigate } from "react-router-dom";
+import axios from "axios";
 import {
   LayoutDashboard,
   Zap,
@@ -9,14 +10,9 @@ import {
   Users,
   Settings as SettingsIcon,
   Menu,
-  Bell,
-  Search,
-  ChevronRight,
-  Sparkles,
-  RefreshCw,
-  Terminal,
-  HelpCircle,
-  ExternalLink
+  X,
+  LogOut,
+  ShieldCheck
 } from "lucide-react";
 import Dashboard from "./pages/Dashboard";
 import Offers from "./pages/Offers";
@@ -24,11 +20,49 @@ import Filters from "./pages/Filters";
 import Reports from "./pages/Reports";
 import Publishers from "./pages/Publishers";
 import Settings from "./pages/Settings";
+import Login from "./pages/Login";
 import { Badge } from "./components/ui/Badge";
+import { User } from "./types";
 
 export default function App() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [token, setToken] = useState<string | null>(localStorage.getItem("npc_token"));
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem("npc_user");
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  // Attach Axios request interceptor for Authorization header
+  useEffect(() => {
+    const interceptor = axios.interceptors.request.use((config) => {
+      const storedToken = localStorage.getItem("npc_token");
+      if (storedToken) {
+        config.headers["Authorization"] = `Bearer ${storedToken}`;
+      }
+      return config;
+    });
+
+    return () => {
+      axios.interceptors.request.eject(interceptor);
+    };
+  }, []);
+
+  const handleLoginSuccess = (newToken: string, newUser: User) => {
+    setToken(newToken);
+    setUser(newUser);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("npc_token");
+    localStorage.removeItem("npc_user");
+    setToken(null);
+    setUser(null);
+  };
+
+  if (!token) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
 
   const navItems = [
     { name: "Dashboard", path: "/", icon: LayoutDashboard },
@@ -50,17 +84,16 @@ export default function App() {
         {/* Brand Header */}
         <div className="p-6 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-slate-950 rounded flex items-center justify-center shadow-sm">
+            <div className="w-8 h-8 bg-slate-950 rounded-lg flex items-center justify-center shadow-sm">
               <span className="text-white text-xs font-black font-mono">NT</span>
             </div>
             <span className="font-bold text-lg tracking-tight text-slate-900">NPC_tracker</span>
           </div>
-          {/* Mobile menu close button */}
           <button
             onClick={() => setMobileMenuOpen(false)}
             className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-50 md:hidden"
           >
-            <XIcon className="w-5 h-5" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -86,24 +119,33 @@ export default function App() {
           })}
         </nav>
 
-        {/* Profile Footer in Sidebar */}
+        {/* Profile & Logout Footer */}
         <div className="p-4 border-t border-slate-100 bg-white">
-          <div className="flex items-center gap-3 p-2 bg-slate-50 rounded-xl">
-            <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-bold text-xs text-slate-700">
-              EA
+          <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-xs text-white">
+                {user?.username ? user.username.substring(0, 2).toUpperCase() : "AD"}
+              </div>
+              <div className="flex flex-col min-w-0">
+                <span className="text-xs font-semibold text-slate-800 truncate">{user?.username || "Admin"}</span>
+                <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                  Active Session
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs font-semibold text-slate-800 truncate">Enterprise Admin</span>
-              <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                Node Active
-              </span>
-            </div>
+            <button
+              onClick={handleLogout}
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+              title="Sign Out"
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </aside>
 
-      {/* Backdrop for mobile navigation menu */}
+      {/* Backdrop for mobile menu */}
       {mobileMenuOpen && (
         <div
           onClick={() => setMobileMenuOpen(false)}
@@ -116,23 +158,21 @@ export default function App() {
         {/* Top Header */}
         <header className="h-16 bg-white border-b border-slate-200 px-6 sm:px-8 flex items-center justify-between shrink-0 sticky top-0 z-20">
           <div className="flex items-center gap-4">
-            {/* Toggle mobile sidebar */}
             <button
               onClick={() => setMobileMenuOpen(true)}
               className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg md:hidden cursor-pointer"
             >
               <Menu size={20} />
             </button>
-            <h1 className="hidden sm:block text-sm font-bold text-slate-500 uppercase tracking-widest">
-              Traffic Redirect Operations
+            <h1 className="hidden sm:block text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+              <ShieldCheck size={14} className="text-emerald-600" />
+              Traffic Operations & Redirect Engine
             </h1>
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="h-8 w-px bg-slate-200" />
-
-            <Badge variant="primary" className="bg-indigo-50 border-indigo-100 text-indigo-700">
-              Live Gateway v2.4
+            <Badge variant="primary" className="bg-indigo-50 border-indigo-100 text-indigo-700 font-mono">
+              SQLite Node v3.0
             </Badge>
           </div>
         </header>
@@ -161,21 +201,5 @@ export default function App() {
         </main>
       </div>
     </div>
-  );
-}
-
-// Simple custom inline Close icon
-function XIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={2}
-      stroke="currentColor"
-      {...props}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-    </svg>
   );
 }
