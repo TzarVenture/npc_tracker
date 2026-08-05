@@ -24,7 +24,7 @@ export default function Publishers() {
         const res = await axios.get("/api/publishers");
         setPublishers(res.data);
       } catch (err) {
-        console.error("Failed to fetch publishers", err);
+        // Quiet fail
       } finally {
         setLoading(false);
       }

@@ -1,5 +1,11 @@
 /* types.ts: Shared TypeScript interfaces for the tracker data models. */
 
+export interface OfferEvent {
+  eventName: string;
+  payout: number;
+  revenue: number;
+}
+
 export interface Offer {
   _id: string;
   name: string;
@@ -14,9 +20,16 @@ export interface Offer {
   browserTargeting?: string[];
   ispTargeting?: string[];
   dailyCap: number;
+  hourlyCap?: number;
+  startDate?: string;
+  endDate?: string;
+  duplicateWindowMinutes?: number;
+  events?: OfferEvent[];
   actionOnFilter: 'redirect' | 'block' | 'log' | 'drop';
   blockBots: boolean;
   triggerDelayMs?: number;
+  triggerIntervalMs?: number;
+  triggerRepeatCount?: number;
   frequencyCap?: 'unlimited' | 'once_per_session' | 'once_per_user';
   targetPages?: string[];
   status: 'active' | 'paused';
@@ -33,6 +46,7 @@ export interface Conversion {
   pubId?: string;
   subId1?: string;
   subId2?: string;
+  eventName?: string;
   revenue: number;
   payout: number;
   timestamp: string;
@@ -53,6 +67,7 @@ export interface Click {
   isp?: string;
   userAgent: string;
   status: 'passed' | 'filtered' | 'capped' | 'blocked';
+  filterReason?: string;
   revenue: number;
   timestamp: string;
 }
@@ -66,4 +81,17 @@ export interface DashboardStats {
   filteredTraffic: number;
   passedTraffic: number;
   totalRevenue: number;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  role: 'admin';
+}
+
+export interface LoginResponse {
+  success: boolean;
+  token?: string;
+  user?: User;
+  error?: string;
 }

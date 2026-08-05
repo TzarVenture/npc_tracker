@@ -128,7 +128,7 @@ export default function Dashboard() {
         setSimFormData(prev => ({ ...prev, offerId: offersRes.data[0]._id }));
       }
     } catch (err) {
-      console.error("Error fetching dashboard statistics:", err);
+      // Quiet fail
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -152,11 +152,9 @@ export default function Dashboard() {
       setGlobalTracking(res.data.globalTracking);
       fetchData(true);
     } catch (err) {
-      console.error("Error toggling global tracking:", err);
+      // Quiet fail
     }
   };
-
-
 
   const runSimulation = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -180,14 +178,12 @@ export default function Dashboard() {
 
     try {
       const res = await axios.post("/api/simulate", payload);
-      // Give it a subtle delay for high quality feeling
       setTimeout(() => {
         setSimResult(res.data);
         setSimulating(false);
         fetchData(true);
       }, 700);
     } catch (err) {
-      console.error("Simulation failed:", err);
       setSimulating(false);
     }
   };

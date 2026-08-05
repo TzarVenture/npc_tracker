@@ -1,65 +1,46 @@
-/* server.ts: Main Express server handling API endpoints and traffic routing pipeline. */
+/* server.ts: Main Express server handling API endpoints, SQLite DB operations, JWT Auth, and traffic routing pipeline. */
 import express from "express";
 import cors from "cors";
 import path from "path";
-import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import geoip from "geoip-lite";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import {
+  getAllOffers,
+  getOfferById,
+  saveOffer,
+  deleteOffer,
+  recordClick,
+  recordConversion,
+  getConversionByClickId,
+  getClickById,
+  getClicksPaginated,
+  getAllClicksFiltered,
+  getConversionsPaginated,
+  getBlacklist,
+  addBlacklistIp,
+  removeBlacklistIp,
+  getGlobalTrackingState,
+  setGlobalTrackingState,
+  getDashboardStats,
+  getGeoStats,
+  getHourlyPerformance,
+  getPublishersStats,
+  getAdminUserByUsername,
+  getClicksTodayCount,
+  getClicksHourlyCount,
+  hasRecentClickFromIp,
+  incrementOfferClickCount
+} from "./db";
+import { authMiddleware, AuthenticatedRequest, JWT_SECRET } from "./authMiddleware";
 import { Offer, Click, Conversion } from "./src/types";
 
 const app = express();
-const PORT = 3000;
-const DB_FILE = path.join(process.cwd(), "db.json");
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(cors());
 app.use(express.json());
-
-// In-memory database with disk sync
-let db: {
-  offers: Offer[];
-  clicks: Click[];
-  conversions: Conversion[];
-  globalTracking: boolean;
-  blacklist: string[];
-} = {
-  offers: [],
-  clicks: [],
-  conversions: [],
-  globalTracking: true,
-  blacklist: []
-};
-
-const loadDB = () => {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const content = fs.readFileSync(DB_FILE, "utf-8");
-      const parsed = JSON.parse(content);
-      db = {
-        offers: parsed.offers || [],
-        clicks: parsed.clicks || [],
-        conversions: parsed.conversions || [],
-        globalTracking: parsed.globalTracking !== false,
-        blacklist: parsed.blacklist || []
-      };
-    } else {
-      saveDB();
-    }
-  } catch (error) {
-    console.error("Failed to load local DB, starting empty:", error);
-    saveDB();
-  }
-};
-
-const saveDB = () => {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf-8");
-  } catch (error) {
-    console.error("Failed to write to local DB file:", error);
-  }
-};
-
-// Initialize DB loading
-loadDB();
 
 // Helper to determine visitor attributes from user-agent
 const parseUA = (ua: string) => {
@@ -94,18 +75,18 @@ const parseUA = (ua: string) => {
   return { device, os, browser };
 };
 
-// Simple bot check helper
+// Bot check helper
 const isBot = (ua: string) => {
   if (!ua) return false;
   const lower = ua.toLowerCase();
   return /bot|crawler|spider|crawling|googlebot|bingbot|yandex|slurp|duckduckbot|chrome-lighthouse|lighthouse/i.test(lower);
 };
 
-// Real Country/City mapping using geoip-lite
+// Country/City mapping using geoip-lite
 const getGeoFromIp = (ip: string) => {
   const cleanIp = (ip || "").trim();
   if (cleanIp === "127.0.0.1" || cleanIp === "::1" || cleanIp.startsWith("192.168.")) {
-    return { country: "US", city: "Localhost" }; // Default simulation local to US
+    return { country: "US", city: "Localhost" };
   }
   const geo = geoip.lookup(cleanIp);
   return {
@@ -115,33 +96,70 @@ const getGeoFromIp = (ip: string) => {
 };
 
 // ==========================================
-// API ENDPOINTS
+// AUTHENTICATION ENDPOINTS
 // ==========================================
 
-// Health Check
+app.post("/api/auth/login", (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required" });
+  }
+
+  const user = getAdminUserByUsername(username);
+  if (!user) {
+    return res.status(401).json({ error: "Invalid username or password" });
+  }
+
+  const isMatch = bcrypt.compareSync(password, user.password_hash);
+  if (!isMatch) {
+    return res.status(401).json({ error: "Invalid username or password" });
+  }
+
+  const token = jwt.sign(
+    { id: user.id, username: user.username, role: user.role },
+    JWT_SECRET,
+    { expiresIn: "24h" }
+  );
+
+  res.json({
+    success: true,
+    token,
+    user: { id: user.id, username: user.username, role: user.role }
+  });
+});
+
+app.get("/api/auth/me", authMiddleware, (req: AuthenticatedRequest, res) => {
+  res.json({ success: true, user: req.user });
+});
+
+// ==========================================
+// PUBLIC HEALTH & SYSTEM STATUS
+// ==========================================
+
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", globalTracking: db.globalTracking });
+  res.json({ status: "ok", globalTracking: getGlobalTrackingState() });
 });
 
-// Toggle global tracking status
 app.get("/api/global-tracking", (req, res) => {
-  res.json({ globalTracking: db.globalTracking });
+  res.json({ globalTracking: getGlobalTrackingState() });
 });
 
-app.post("/api/global-tracking", (req, res) => {
+app.post("/api/global-tracking", authMiddleware, (req, res) => {
   const { active } = req.body;
-  db.globalTracking = active !== false;
-  saveDB();
-  res.json({ success: true, globalTracking: db.globalTracking });
+  setGlobalTrackingState(active !== false);
+  res.json({ success: true, globalTracking: getGlobalTrackingState() });
 });
 
-// GET all campaigns/offers
+// ==========================================
+// CAMPAIGN / OFFER MANAGEMENT (CRUD)
+// ==========================================
+
 app.get("/api/offers", (req, res) => {
-  res.json(db.offers);
+  res.json(getAllOffers());
 });
 
-// POST create campaign/offer
-app.post("/api/offers", (req, res) => {
+app.post("/api/offers", authMiddleware, (req, res) => {
   const {
     name,
     destinationUrl,
@@ -155,8 +173,18 @@ app.post("/api/offers", (req, res) => {
     browserTargeting,
     ispTargeting,
     dailyCap,
+    hourlyCap,
+    startDate,
+    endDate,
+    duplicateWindowMinutes,
+    events,
     actionOnFilter,
-    blockBots
+    blockBots,
+    targetPages,
+    triggerDelayMs,
+    triggerIntervalMs,
+    triggerRepeatCount,
+    frequencyCap
   } = req.body;
 
   if (!name || !destinationUrl) {
@@ -177,8 +205,18 @@ app.post("/api/offers", (req, res) => {
     browserTargeting: browserTargeting || [],
     ispTargeting: ispTargeting || [],
     dailyCap: Number(dailyCap) || 0,
+    hourlyCap: Number(hourlyCap) || 0,
+    startDate: startDate || undefined,
+    endDate: endDate || undefined,
+    duplicateWindowMinutes: Number(duplicateWindowMinutes) || 0,
+    events: Array.isArray(events) ? events : [],
     actionOnFilter: actionOnFilter || "redirect",
+    blockBots: blockBots === true || blockBots === "true",
     targetPages: Array.isArray(targetPages) ? targetPages : [],
+    triggerDelayMs: Number(triggerDelayMs) || 0,
+    triggerIntervalMs: Number(triggerIntervalMs) || 0,
+    triggerRepeatCount: Number(triggerRepeatCount) || 0,
+    frequencyCap: frequencyCap || "unlimited",
     status: "active",
     clickCount: 0,
     totalConversions: 0,
@@ -186,264 +224,218 @@ app.post("/api/offers", (req, res) => {
     createdAt: new Date().toISOString()
   };
 
-  db.offers.unshift(newOffer);
-  saveDB();
-  res.status(201).json(newOffer);
+  const created = saveOffer(newOffer);
+  res.status(201).json(created);
 });
 
-// PUT update offer
-app.put("/api/offers/:id", (req, res) => {
+app.put("/api/offers/:id", authMiddleware, (req, res) => {
   const { id } = req.params;
-  const idx = db.offers.findIndex(o => o._id === id);
-  if (idx === -1) return res.status(404).json({ error: "Campaign not found" });
+  const existing = getOfferById(id);
+  if (!existing) return res.status(404).json({ error: "Campaign not found" });
 
-  db.offers[idx] = {
-    ...db.offers[idx],
+  const updatedOffer: Offer = {
+    ...existing,
     ...req.body
   };
-  saveDB();
-  res.json(db.offers[idx]);
+
+  const saved = saveOffer(updatedOffer);
+  res.json(saved);
 });
 
-// DELETE campaign/offer
-app.delete("/api/offers/:id", (req, res) => {
+app.delete("/api/offers/:id", authMiddleware, (req, res) => {
   const { id } = req.params;
-  db.offers = db.offers.filter(o => o._id !== id);
-  db.clicks = db.clicks.filter(c => c.offerId !== id);
-  db.conversions = db.conversions.filter(c => c.offerId !== id);
-  saveDB();
+  deleteOffer(id);
   res.json({ success: true, message: "Campaign deleted successfully." });
 });
 
-// GET Postback / Conversion Tracking
+// ==========================================
+// CONVERSION / POSTBACK TRACKING ENDPOINT
+// ==========================================
+
 app.get("/api/postback", (req, res) => {
-  const { click_id, payout, revenue } = req.query;
+  const { click_id, payout, revenue, event } = req.query;
 
   if (!click_id) {
     return res.status(400).json({ error: "Missing click_id parameter" });
   }
 
-  // Check if click exists
-  const click = db.clicks.find(c => c._id === click_id);
+  const clickIdStr = String(click_id);
+  const click = getClickById(clickIdStr);
   if (!click) {
     return res.status(404).json({ error: "Click not found" });
   }
 
-  // Check if already converted
-  const existingConv = db.conversions.find(c => c.clickId === click_id);
+  const existingConv = getConversionByClickId(clickIdStr);
   if (existingConv) {
     return res.status(409).json({ error: "Conversion already recorded for this click" });
   }
 
-  // Create conversion
-  const offer = db.offers.find(o => o._id === click.offerId);
-  const convRevenue = revenue ? Number(revenue) : (offer ? offer.revenue : 0);
-  const convPayout = payout ? Number(payout) : (offer ? offer.payout : 0);
+  const offer = getOfferById(click.offerId);
+  const eventName = (event as string) || "default";
+
+  // Check if custom multi-event rates exist
+  let convRevenue = offer ? offer.revenue : 0;
+  let convPayout = offer ? offer.payout : 0;
+
+  if (offer && offer.events && offer.events.length > 0) {
+    const matchedEvent = offer.events.find(e => e.eventName.toLowerCase() === eventName.toLowerCase());
+    if (matchedEvent) {
+      convRevenue = matchedEvent.revenue;
+      convPayout = matchedEvent.payout;
+    }
+  }
+
+  if (revenue) convRevenue = Number(revenue);
+  if (payout) convPayout = Number(payout);
 
   const newConv: Conversion = {
     _id: "conv-" + Math.random().toString(36).substring(2, 9),
-    clickId: click._id as string,
+    clickId: click._id,
     offerId: click.offerId,
     pubId: click.pubId,
     subId1: click.subId1,
     subId2: click.subId2,
+    eventName,
     revenue: convRevenue,
     payout: convPayout,
     timestamp: new Date().toISOString()
   };
 
-  db.conversions.unshift(newConv);
-
-  // Update offer stats
-  if (offer) {
-    offer.totalConversions = (offer.totalConversions || 0) + 1;
-    offer.conversionRate = offer.clickCount > 0 ? (offer.totalConversions / offer.clickCount) * 100 : 0;
-  }
-
-  saveDB();
+  recordConversion(newConv);
   res.json({ success: true, message: "Conversion recorded", conversion: newConv });
 });
 
-// Aggregated Stats
+// ==========================================
+// ANALYTICS & REPORTING ENDPOINTS
+// ==========================================
+
 app.get("/api/stats", (req, res) => {
-  const totalOffers = db.offers.length;
-  const activeOffers = db.offers.filter(o => o.status === "active").length;
-
-  const totalClicks = db.clicks.length;
-  const filteredTraffic = db.clicks.filter(c => ["filtered", "capped", "blocked"].includes(c.status)).length;
-  const passedTraffic = db.clicks.filter(c => c.status === "passed").length;
-
-  const totalConversions = db.conversions.length;
-  const conversionRate = passedTraffic > 0 ? (totalConversions / passedTraffic) * 100 : 0;
-
-  // Revenue should primarily come from conversions in CPA tracking
-  const totalRevenue = db.conversions.reduce((acc, c) => acc + c.revenue, 0);
-
-  res.json({
-    totalOffers,
-    activeOffers,
-    totalClicks,
-    filteredTraffic,
-    passedTraffic,
-    totalConversions,
-    conversionRate,
-    totalRevenue
-  });
+  res.json(getDashboardStats());
 });
 
-// Recent Live Clicks Log
 app.get("/api/stats/live", (req, res) => {
-  const limit = 20;
-  const recent = db.clicks.slice(0, limit);
-  res.json(recent);
+  const limit = parseInt(req.query.limit as string) || 20;
+  res.json(getClicksPaginated(1, limit).data);
 });
 
-// Paginated Clicks Endpoint
 app.get("/api/clicks", (req, res) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
-  const startIndex = (page - 1) * limit;
-  const endIndex = page * limit;
+  const offerId = req.query.offerId as string;
+  const status = req.query.status as string;
+  const search = req.query.search as string;
 
-  const results = db.clicks.slice(startIndex, endIndex);
-  res.json({
-    total: db.clicks.length,
-    page,
-    limit,
-    data: results
-  });
+  res.json(getClicksPaginated(page, limit, offerId, status, search));
 });
 
-// Paginated Conversions Endpoint
+// Stream Server-Side CSV Export
+app.get("/api/clicks/export", authMiddleware, (req, res) => {
+  const offerId = req.query.offerId as string;
+  const status = req.query.status as string;
+  const search = req.query.search as string;
+
+  const allClicks = getAllClicksFiltered(offerId, status, search);
+  const offers = getAllOffers();
+
+  const getCampaignName = (oId: string) => {
+    const found = offers.find(o => o._id === oId);
+    return found ? found.name : "Unknown";
+  };
+
+  const headers = [
+    "Click ID",
+    "Timestamp",
+    "Campaign ID",
+    "Campaign Name",
+    "IP Address",
+    "Country",
+    "City",
+    "Device",
+    "OS",
+    "Browser",
+    "ISP",
+    "Publisher ID",
+    "Sub ID 1",
+    "Sub ID 2",
+    "Status",
+    "Filter Reason",
+    "Revenue ($)"
+  ];
+
+  const rows = allClicks.map(c => [
+    c._id,
+    c.timestamp,
+    c.offerId,
+    `"${getCampaignName(c.offerId).replace(/"/g, '""')}"`,
+    c.ip,
+    c.country,
+    c.city || "",
+    c.device,
+    c.os,
+    c.browser || "",
+    `"${(c.isp || "").replace(/"/g, '""')}"`,
+    c.pubId || "",
+    c.subId1 || "",
+    c.subId2 || "",
+    c.status,
+    `"${(c.filterReason || "").replace(/"/g, '""')}"`,
+    c.revenue
+  ]);
+
+  const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename=npc_tracker_export_${new Date().toISOString().split("T")[0]}.csv`);
+  res.status(200).send(csvContent);
+});
+
 app.get("/api/conversions", (req, res) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
-  const startIndex = (page - 1) * limit;
-  const endIndex = page * limit;
 
-  const results = db.conversions.slice(startIndex, endIndex);
-  res.json({
-    total: db.conversions.length,
-    page,
-    limit,
-    data: results
-  });
+  res.json(getConversionsPaginated(page, limit));
 });
 
-// Publishers Aggregation Endpoint
 app.get("/api/publishers", (req, res) => {
-  const pubStats: Record<string, any> = {};
-  db.clicks.forEach(c => {
-    const pId = c.pubId || "Direct";
-    if (!pubStats[pId]) {
-      pubStats[pId] = { id: pId, name: pId, clickCount: 0, passed: 0, filtered: 0, payout: 0, revenue: 0 };
-    }
-    pubStats[pId].clickCount += 1;
-    if (c.status === "passed") {
-      pubStats[pId].passed += 1;
-      pubStats[pId].revenue += c.revenue;
-      pubStats[pId].payout = c.revenue;
-    } else {
-      pubStats[pId].filtered += 1;
-    }
-  });
-  res.json(Object.values(pubStats));
+  res.json(getPublishersStats());
 });
 
-// Blacklist API
 app.get("/api/blacklist", (req, res) => {
-  res.json(db.blacklist || []);
+  res.json(getBlacklist());
 });
 
-app.post("/api/blacklist", (req, res) => {
+app.post("/api/blacklist", authMiddleware, (req, res) => {
   const { ip } = req.body;
-  if (ip && !db.blacklist.includes(ip)) {
-    db.blacklist.push(ip);
-    saveDB();
+  if (ip) {
+    addBlacklistIp(ip);
   }
-  res.json(db.blacklist);
+  res.json(getBlacklist());
 });
 
-app.delete("/api/blacklist/:ip", (req, res) => {
+app.delete("/api/blacklist/:ip", authMiddleware, (req, res) => {
   const { ip } = req.params;
-  db.blacklist = db.blacklist.filter(b => b !== ip);
-  saveDB();
-  res.json(db.blacklist);
+  removeBlacklistIp(ip);
+  res.json(getBlacklist());
 });
 
-// Get Top Countries traffic breakdown
 app.get("/api/stats/geos", (req, res) => {
-  const geosMap: Record<string, number> = {};
-  db.clicks.forEach(c => {
-    const geo = c.country || "Unknown";
-    geosMap[geo] = (geosMap[geo] || 0) + 1;
-  });
-
-  const geoNames: Record<string, string> = {
-    US: "United States",
-    CA: "Canada",
-    GB: "United Kingdom",
-    IN: "India",
-    DE: "Germany",
-    FR: "France",
-    AU: "Australia",
-    Unknown: "Unknown"
-  };
-
-  const sortedGeos = Object.entries(geosMap)
-    .map(([code, count]) => ({
-      name: geoNames[code] || code,
-      code,
-      val: count
-    }))
-    .sort((a, b) => b.val - a.val)
-    .slice(0, 5);
-
-  res.json(sortedGeos);
+  res.json(getGeoStats());
 });
 
-// Performance Hourly Chart Data
 app.get("/api/stats/performance", (req, res) => {
-  const buckets = [
-    { time: "00:00", clicks: 0, revenue: 0, filtered: 0 },
-    { time: "04:00", clicks: 0, revenue: 0, filtered: 0 },
-    { time: "08:00", clicks: 0, revenue: 0, filtered: 0 },
-    { time: "12:00", clicks: 0, revenue: 0, filtered: 0 },
-    { time: "16:00", clicks: 0, revenue: 0, filtered: 0 },
-    { time: "20:00", clicks: 0, revenue: 0, filtered: 0 }
-  ];
-
-  db.clicks.forEach(c => {
-    const time = new Date(c.timestamp);
-    const hour = time.getHours();
-    let bIdx = 0;
-    if (hour >= 20) bIdx = 5;
-    else if (hour >= 16) bIdx = 4;
-    else if (hour >= 12) bIdx = 3;
-    else if (hour >= 8) bIdx = 2;
-    else if (hour >= 4) bIdx = 1;
-
-    buckets[bIdx].clicks += 1;
-    if (c.status === "passed") {
-      buckets[bIdx].revenue += c.revenue;
-    } else {
-      buckets[bIdx].filtered += 1;
-    }
-  });
-
-  res.json(buckets);
+  res.json(getHourlyPerformance());
 });
 
 // Traffic Click Simulator
 app.post("/api/simulate", (req, res) => {
   const { offerId, ip, country, userAgent, pubId, subId1, subId2, city, isp } = req.body;
 
-  const offer = db.offers.find(o => o._id === offerId);
+  const offer = getOfferById(offerId);
   if (!offer) {
     return res.status(404).json({ error: "Campaign not found" });
   }
 
-  const clientIp = ip || "192.168.1.100";
+  const clientIp = ip || "192.168.12.34";
   const geo = getGeoFromIp(clientIp);
   const clientCountry = country || geo.country;
   const clientCity = city || geo.city;
@@ -455,21 +447,30 @@ app.post("/api/simulate", (req, res) => {
   let filterReason = "";
   let finalUrl = offer.destinationUrl;
 
-  const today = new Date().toISOString().split('T')[0];
-  const clicksToday = db.clicks.filter(c => c.offerId === offer._id && c.timestamp.startsWith(today)).length;
+  const nowIso = new Date().toISOString();
+  const blacklist = getBlacklist();
 
-  if (!db.globalTracking) {
+  if (!getGlobalTrackingState()) {
     status = "filtered";
     filterReason = "Global Tracking Suspended";
   } else if (offer.status !== "active") {
     status = "filtered";
     filterReason = "Campaign Paused";
-  } else if (db.blacklist?.includes(clientIp)) {
+  } else if (offer.startDate && nowIso < offer.startDate) {
+    status = "filtered";
+    filterReason = `Campaign Schedule Pending (Starts ${offer.startDate})`;
+  } else if (offer.endDate && nowIso > offer.endDate) {
+    status = "filtered";
+    filterReason = `Campaign Schedule Expired (Ended ${offer.endDate})`;
+  } else if (blacklist.includes(clientIp)) {
     status = "blocked";
     filterReason = "IP Blacklisted";
   } else if (offer.blockBots && isBot(clientUA)) {
     status = "blocked";
     filterReason = "Bot Signature Detected";
+  } else if (offer.duplicateWindowMinutes && offer.duplicateWindowMinutes > 0 && hasRecentClickFromIp(offer._id, clientIp, offer.duplicateWindowMinutes)) {
+    status = "filtered";
+    filterReason = `Duplicate Click Window Active (${offer.duplicateWindowMinutes} mins)`;
   } else if (offer.geoTargeting && offer.geoTargeting.length > 0 && !offer.geoTargeting.includes(clientCountry)) {
     status = "filtered";
     filterReason = `Country Restricted (Allowed: ${offer.geoTargeting.join(", ")})`;
@@ -488,7 +489,10 @@ app.post("/api/simulate", (req, res) => {
   } else if (offer.osType && offer.osType !== "All" && offer.osType !== os) {
     status = "filtered";
     filterReason = `OS Restricted (Allowed: ${offer.osType})`;
-  } else if (offer.dailyCap > 0 && clicksToday >= offer.dailyCap) {
+  } else if (offer.hourlyCap && offer.hourlyCap > 0 && getClicksHourlyCount(offer._id) >= offer.hourlyCap) {
+    status = "capped";
+    filterReason = "Hourly Click Cap Reached";
+  } else if (offer.dailyCap && offer.dailyCap > 0 && getClicksTodayCount(offer._id) >= offer.dailyCap) {
     status = "capped";
     filterReason = "Daily Click Cap Reached";
   }
@@ -504,7 +508,7 @@ app.post("/api/simulate", (req, res) => {
       finalUrl = offer.destinationUrl;
     }
   } else {
-    offer.clickCount += 1;
+    incrementOfferClickCount(offer._id);
   }
 
   if (finalUrl !== "BLOCK_ACCESS_DENIED") {
@@ -529,12 +533,12 @@ app.post("/api/simulate", (req, res) => {
     isp: clientIsp,
     userAgent: clientUA,
     status,
+    filterReason,
     revenue: status === "passed" ? offer.revenue : 0,
     timestamp: new Date().toISOString()
   };
 
-  db.clicks.unshift(newClick);
-  saveDB();
+  recordClick(newClick);
 
   res.json({
     success: true,
@@ -552,13 +556,15 @@ app.post("/api/simulate", (req, res) => {
 // CLIENT-SIDE PIXEL TRACKING ENDPOINT
 // ==========================================
 app.post("/api/pixel-track", (req, res) => {
-  const { offer_id, pub_id, sub_id1, sub_id2, isp } = req.body;
+  // Support both camelCase offerId and snake_case offer_id
+  const targetOfferId = req.body.offer_id || req.body.offerId;
+  const { pub_id, pubId, sub_id1, subId1, sub_id2, subId2, isp } = req.body;
 
-  if (!offer_id) {
-    return res.status(400).json({ error: "Missing offer_id" });
+  if (!targetOfferId) {
+    return res.status(400).json({ error: "Missing offer_id parameter" });
   }
 
-  const offer = db.offers.find(o => o._id === offer_id);
+  const offer = getOfferById(targetOfferId);
   if (!offer) {
     return res.status(404).json({ error: "Campaign Not Found" });
   }
@@ -571,34 +577,71 @@ app.post("/api/pixel-track", (req, res) => {
   const clientIsp = isp || "Unknown ISP";
 
   let status: "passed" | "filtered" | "capped" | "blocked" = "passed";
+  let filterReason = "";
+  const nowIso = new Date().toISOString();
+  const blacklist = getBlacklist();
 
-  const today = new Date().toISOString().split('T')[0];
-  const clicksToday = db.clicks.filter(c => c.offerId === offer._id && c.timestamp.startsWith(today)).length;
-
-  if (!db.globalTracking) status = "filtered";
-  else if (offer.status !== "active") status = "filtered";
-  else if (db.blacklist?.includes(ipString)) status = "blocked";
-  else if (offer.blockBots && isBot(userAgentStr)) status = "blocked";
-  else if (offer.geoTargeting && offer.geoTargeting.length > 0 && !offer.geoTargeting.includes(geo.country)) status = "filtered";
-  else if (offer.cityTargeting && offer.cityTargeting.length > 0 && !offer.cityTargeting.includes(geo.city.toUpperCase())) status = "filtered";
-  else if (offer.browserTargeting && offer.browserTargeting.length > 0 && !offer.browserTargeting.includes(browser.toUpperCase())) status = "filtered";
-  else if (offer.ispTargeting && offer.ispTargeting.length > 0 && !offer.ispTargeting.includes(clientIsp.toUpperCase())) status = "filtered";
-  else if (offer.deviceType && offer.deviceType !== "All" && offer.deviceType !== device) status = "filtered";
-  else if (offer.osType && offer.osType !== "All" && offer.osType !== os) status = "filtered";
-  else if (offer.dailyCap > 0 && clicksToday >= offer.dailyCap) status = "capped";
-
-  if (status !== "passed" && offer.actionOnFilter === "drop") {
-    return res.json({ success: true, dropped: true });
+  if (!getGlobalTrackingState()) {
+    status = "filtered";
+    filterReason = "Global Tracking Suspended";
+  } else if (offer.status !== "active") {
+    status = "filtered";
+    filterReason = "Campaign Paused";
+  } else if (offer.startDate && nowIso < offer.startDate) {
+    status = "filtered";
+    filterReason = "Campaign Schedule Pending";
+  } else if (offer.endDate && nowIso > offer.endDate) {
+    status = "filtered";
+    filterReason = "Campaign Schedule Expired";
+  } else if (blacklist.includes(ipString)) {
+    status = "blocked";
+    filterReason = "IP Blacklisted";
+  } else if (offer.blockBots && isBot(userAgentStr)) {
+    status = "blocked";
+    filterReason = "Bot Signature Detected";
+  } else if (offer.duplicateWindowMinutes && offer.duplicateWindowMinutes > 0 && hasRecentClickFromIp(offer._id, ipString, offer.duplicateWindowMinutes)) {
+    status = "filtered";
+    filterReason = "Duplicate Click Window Active";
+  } else if (offer.geoTargeting && offer.geoTargeting.length > 0 && !offer.geoTargeting.includes(geo.country)) {
+    status = "filtered";
+    filterReason = "Geo Restricted";
+  } else if (offer.cityTargeting && offer.cityTargeting.length > 0 && !offer.cityTargeting.includes(geo.city.toUpperCase())) {
+    status = "filtered";
+    filterReason = "City Restricted";
+  } else if (offer.browserTargeting && offer.browserTargeting.length > 0 && !offer.browserTargeting.includes(browser.toUpperCase())) {
+    status = "filtered";
+    filterReason = "Browser Restricted";
+  } else if (offer.ispTargeting && offer.ispTargeting.length > 0 && !offer.ispTargeting.includes(clientIsp.toUpperCase())) {
+    status = "filtered";
+    filterReason = "ISP Restricted";
+  } else if (offer.deviceType && offer.deviceType !== "All" && offer.deviceType !== device) {
+    status = "filtered";
+    filterReason = "Device Restricted";
+  } else if (offer.osType && offer.osType !== "All" && offer.osType !== os) {
+    status = "filtered";
+    filterReason = "OS Restricted";
+  } else if (offer.hourlyCap && offer.hourlyCap > 0 && getClicksHourlyCount(offer._id) >= offer.hourlyCap) {
+    status = "capped";
+    filterReason = "Hourly Click Cap Reached";
+  } else if (offer.dailyCap && offer.dailyCap > 0 && getClicksTodayCount(offer._id) >= offer.dailyCap) {
+    status = "capped";
+    filterReason = "Daily Click Cap Reached";
   }
 
-  if (status === "passed") offer.clickCount += 1;
+  if (status !== "passed" && offer.actionOnFilter === "drop") {
+    return res.json({ success: true, dropped: true, filterReason });
+  }
+
+  if (status === "passed") {
+    incrementOfferClickCount(offer._id);
+  }
 
   const clickLog: Click = {
     _id: "click-" + Math.random().toString(36).substring(2, 9),
     offerId: offer._id,
-    pubId: String(pub_id || ""),
-    subId1: String(sub_id1 || ""),
-    subId2: String(sub_id2 || ""),
+    pubId: String(pub_id || pubId || ""),
+    subId1: String(sub_id1 || subId1 || ""),
+    subId2: String(sub_id2 || subId2 || ""),
     ip: ipString,
     country: geo.country,
     city: geo.city,
@@ -608,14 +651,13 @@ app.post("/api/pixel-track", (req, res) => {
     isp: clientIsp,
     userAgent: userAgentStr,
     status,
+    filterReason,
     revenue: status === "passed" ? offer.revenue : 0,
     timestamp: new Date().toISOString()
   };
 
-  db.clicks.unshift(clickLog);
-  saveDB();
-
-  res.json({ success: true, status });
+  recordClick(clickLog);
+  res.json({ success: true, status, filterReason });
 });
 
 // ==========================================
@@ -628,7 +670,7 @@ app.get("/track", (req, res) => {
     return res.status(400).send("<h1>Error: Missing offer_id</h1>");
   }
 
-  const offer = db.offers.find(o => o._id === offer_id);
+  const offer = getOfferById(String(offer_id));
   if (!offer) {
     return res.status(404).send("<h1>Error: Campaign Not Found</h1>");
   }
@@ -641,22 +683,57 @@ app.get("/track", (req, res) => {
   const clientIsp = "Unknown ISP";
 
   let status: "passed" | "filtered" | "capped" | "blocked" = "passed";
+  let filterReason = "";
   let finalUrl = offer.destinationUrl;
+  const nowIso = new Date().toISOString();
+  const blacklist = getBlacklist();
 
-  const today = new Date().toISOString().split('T')[0];
-  const clicksToday = db.clicks.filter(c => c.offerId === offer._id && c.timestamp.startsWith(today)).length;
-
-  if (!db.globalTracking) status = "filtered";
-  else if (offer.status !== "active") status = "filtered";
-  else if (db.blacklist?.includes(ipString)) status = "blocked";
-  else if (offer.blockBots && isBot(userAgentStr)) status = "blocked";
-  else if (offer.geoTargeting && offer.geoTargeting.length > 0 && !offer.geoTargeting.includes(geo.country)) status = "filtered";
-  else if (offer.cityTargeting && offer.cityTargeting.length > 0 && !offer.cityTargeting.includes(geo.city.toUpperCase())) status = "filtered";
-  else if (offer.browserTargeting && offer.browserTargeting.length > 0 && !offer.browserTargeting.includes(browser.toUpperCase())) status = "filtered";
-  else if (offer.ispTargeting && offer.ispTargeting.length > 0 && !offer.ispTargeting.includes(clientIsp.toUpperCase())) status = "filtered";
-  else if (offer.deviceType && offer.deviceType !== "All" && offer.deviceType !== device) status = "filtered";
-  else if (offer.osType && offer.osType !== "All" && offer.osType !== os) status = "filtered";
-  else if (offer.dailyCap > 0 && clicksToday >= offer.dailyCap) status = "capped";
+  if (!getGlobalTrackingState()) {
+    status = "filtered";
+    filterReason = "Global Tracking Suspended";
+  } else if (offer.status !== "active") {
+    status = "filtered";
+    filterReason = "Campaign Paused";
+  } else if (offer.startDate && nowIso < offer.startDate) {
+    status = "filtered";
+    filterReason = "Campaign Schedule Pending";
+  } else if (offer.endDate && nowIso > offer.endDate) {
+    status = "filtered";
+    filterReason = "Campaign Schedule Expired";
+  } else if (blacklist.includes(ipString)) {
+    status = "blocked";
+    filterReason = "IP Blacklisted";
+  } else if (offer.blockBots && isBot(userAgentStr)) {
+    status = "blocked";
+    filterReason = "Bot Signature Detected";
+  } else if (offer.duplicateWindowMinutes && offer.duplicateWindowMinutes > 0 && hasRecentClickFromIp(offer._id, ipString, offer.duplicateWindowMinutes)) {
+    status = "filtered";
+    filterReason = "Duplicate Click Window Active";
+  } else if (offer.geoTargeting && offer.geoTargeting.length > 0 && !offer.geoTargeting.includes(geo.country)) {
+    status = "filtered";
+    filterReason = "Geo Restricted";
+  } else if (offer.cityTargeting && offer.cityTargeting.length > 0 && !offer.cityTargeting.includes(geo.city.toUpperCase())) {
+    status = "filtered";
+    filterReason = "City Restricted";
+  } else if (offer.browserTargeting && offer.browserTargeting.length > 0 && !offer.browserTargeting.includes(browser.toUpperCase())) {
+    status = "filtered";
+    filterReason = "Browser Restricted";
+  } else if (offer.ispTargeting && offer.ispTargeting.length > 0 && !offer.ispTargeting.includes(clientIsp.toUpperCase())) {
+    status = "filtered";
+    filterReason = "ISP Restricted";
+  } else if (offer.deviceType && offer.deviceType !== "All" && offer.deviceType !== device) {
+    status = "filtered";
+    filterReason = "Device Restricted";
+  } else if (offer.osType && offer.osType !== "All" && offer.osType !== os) {
+    status = "filtered";
+    filterReason = "OS Restricted";
+  } else if (offer.hourlyCap && offer.hourlyCap > 0 && getClicksHourlyCount(offer._id) >= offer.hourlyCap) {
+    status = "capped";
+    filterReason = "Hourly Click Cap Reached";
+  } else if (offer.dailyCap && offer.dailyCap > 0 && getClicksTodayCount(offer._id) >= offer.dailyCap) {
+    status = "capped";
+    filterReason = "Daily Click Cap Reached";
+  }
 
   if (status !== "passed") {
     if (offer.actionOnFilter === "drop") {
@@ -677,11 +754,11 @@ app.get("/track", (req, res) => {
         isp: clientIsp,
         userAgent: userAgentStr,
         status,
+        filterReason,
         revenue: 0,
         timestamp: new Date().toISOString()
       };
-      db.clicks.unshift(clickLog);
-      saveDB();
+      recordClick(clickLog);
       return res.status(403).send("<h1>Access Denied</h1>");
     } else if (offer.actionOnFilter === "redirect") {
       finalUrl = offer.fallbackUrl;
@@ -689,7 +766,7 @@ app.get("/track", (req, res) => {
       finalUrl = offer.destinationUrl;
     }
   } else {
-    offer.clickCount += 1;
+    incrementOfferClickCount(offer._id);
   }
 
   const clickLog: Click = {
@@ -707,12 +784,12 @@ app.get("/track", (req, res) => {
     isp: clientIsp,
     userAgent: userAgentStr,
     status,
+    filterReason,
     revenue: status === "passed" ? offer.revenue : 0,
     timestamp: new Date().toISOString()
   };
 
-  db.clicks.unshift(clickLog);
-  saveDB();
+  recordClick(clickLog);
 
   let finalDest = finalUrl
     .replace(/{pub_id}/g, String(pub_id || ""))
@@ -727,10 +804,98 @@ app.get("/track", (req, res) => {
 });
 
 // ==========================================
+// DYNAMIC JS SNIPPET GENERATOR
+// ==========================================
+app.get("/api/script/:offerId.js", (req, res) => {
+  const { offerId } = req.params;
+  const offer = getOfferById(offerId);
+
+  if (!offer) {
+    return res.type("application/javascript").send("// Tracker: Campaign not found");
+  }
+
+  const targetPagesStr = offer.targetPages && offer.targetPages.length > 0 ? JSON.stringify(offer.targetPages) : "[]";
+  const delayMs = offer.triggerDelayMs || 0;
+  const intervalMs = offer.triggerIntervalMs || 0;
+  const repeatCount = offer.triggerRepeatCount || 0;
+  const freqCap = offer.frequencyCap || "unlimited";
+
+  const scriptContent = `
+(function() {
+  const config = {
+    offerId: "${offerId}",
+    targetPages: ${targetPagesStr},
+    delayMs: ${delayMs},
+    intervalMs: ${intervalMs},
+    repeatCount: ${repeatCount},
+    freqCap: "${freqCap}",
+    trackerUrl: "${req.protocol}://${req.get('host')}/api/pixel-track"
+  };
+
+  if (config.targetPages.length > 0) {
+    const currentPath = window.location.pathname;
+    const matches = config.targetPages.some(function(page) { return currentPath.includes(page); });
+    if (!matches) return;
+  }
+
+  const sessionKey = "tracker_session_" + config.offerId;
+  const userKey = "tracker_user_" + config.offerId;
+
+  if (config.freqCap === "once_per_session" && sessionStorage.getItem(sessionKey)) return;
+  if (config.freqCap === "once_per_user" && localStorage.getItem(userKey)) return;
+
+  let fireCount = 0;
+  
+  const firePixel = function() {
+    if (config.freqCap === "once_per_session") sessionStorage.setItem(sessionKey, "1");
+    if (config.freqCap === "once_per_user") localStorage.setItem(userKey, "1");
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const pubId = urlParams.get("pub_id") || "";
+    const subId1 = urlParams.get("sub_id1") || "";
+    
+    fetch(config.trackerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        offer_id: config.offerId,
+        pub_id: pubId,
+        sub_id1: subId1,
+        page_url: window.location.href
+      })
+    }).catch(function() {});
+    
+    fireCount++;
+  };
+
+  const startFires = function() {
+    firePixel();
+    if (config.intervalMs > 0 && (config.repeatCount === 0 || config.repeatCount > 1)) {
+      const timerId = setInterval(function() {
+        if (config.repeatCount > 0 && fireCount >= config.repeatCount) {
+          clearInterval(timerId);
+          return;
+        }
+        firePixel();
+      }, config.intervalMs);
+    }
+  };
+
+  if (config.delayMs > 0) {
+    setTimeout(startFires, config.delayMs);
+  } else {
+    startFires();
+  }
+})();
+  `;
+
+  res.type("application/javascript").send(scriptContent);
+});
+
+// ==========================================
 // VITE MIDDLEWARE INTERACTION (DEV/PROD)
 // ==========================================
 
-// Serve public directory for static assets like pixel.js
 app.use(express.static(path.join(process.cwd(), "public")));
 
 async function startServer() {
@@ -749,7 +914,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`\n  ➜  NPC Tracker Server running at: http://localhost:${PORT}/\n`);
   });
 }
 

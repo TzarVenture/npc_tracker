@@ -11,6 +11,7 @@ export interface InputProps {
   placeholder?: string;
   value?: string | number;
   disabled?: boolean;
+  required?: boolean;
   onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   name?: string;
 }
@@ -24,6 +25,7 @@ export function Input({
   placeholder,
   value,
   disabled,
+  required,
   onChange,
   name,
   style
@@ -41,6 +43,7 @@ export function Input({
         placeholder={placeholder}
         value={value}
         disabled={disabled}
+        required={required}
         onChange={onChange}
         name={name}
         className={`w-full px-4 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all placeholder:text-slate-400 ${
