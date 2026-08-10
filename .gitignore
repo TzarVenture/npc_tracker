@@ -7,5 +7,9 @@ coverage/
 .env*
 !.env.example
 
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+db.json
 
 docTemp/*
