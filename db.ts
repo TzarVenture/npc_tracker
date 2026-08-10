@@ -108,6 +108,14 @@ export function initDB() {
     CREATE INDEX IF NOT EXISTS idx_conversions_offer ON conversions(offer_id);
   `);
 
+  // Auto-upgrade schema for new features (Session Check, Tracking URLs, Redirect Types)
+  try { db.exec("ALTER TABLE offers ADD COLUMN session_check_enabled INTEGER DEFAULT 0;"); } catch (e) {}
+  try { db.exec("ALTER TABLE offers ADD COLUMN session_ttl_minutes INTEGER DEFAULT 1440;"); } catch (e) {}
+  try { db.exec("ALTER TABLE offers ADD COLUMN tracking_urls TEXT DEFAULT '[]';"); } catch (e) {}
+  try { db.exec("ALTER TABLE offers ADD COLUMN redirect_type TEXT DEFAULT '302';"); } catch (e) {}
+  try { db.exec("ALTER TABLE offers ADD COLUMN custom_referrer_url TEXT DEFAULT '';"); } catch (e) {}
+  try { db.exec("ALTER TABLE clicks ADD COLUMN session_id TEXT DEFAULT '';"); } catch (e) {}
+
   // Initialize default Admin User if none exists
   const existingAdmin = db.prepare("SELECT * FROM admin_users WHERE username = ?").get("admin");
   if (!existingAdmin) {
@@ -254,11 +262,13 @@ export function saveOffer(offer: Offer): Offer {
       geo_targeting, city_targeting, device_type, os_type, browser_targeting, isp_targeting,
       daily_cap, hourly_cap, start_date, end_date, duplicate_window_minutes, events,
       action_on_filter, block_bots, trigger_delay_ms, trigger_interval_ms, trigger_repeat_count,
-      frequency_cap, target_pages, status, click_count, total_conversions, created_at
+      frequency_cap, target_pages, session_check_enabled, session_ttl_minutes, tracking_urls,
+      redirect_type, custom_referrer_url, status, click_count, total_conversions, created_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?
     ) ON CONFLICT(id) DO UPDATE SET
@@ -286,6 +296,11 @@ export function saveOffer(offer: Offer): Offer {
       trigger_repeat_count = excluded.trigger_repeat_count,
       frequency_cap = excluded.frequency_cap,
       target_pages = excluded.target_pages,
+      session_check_enabled = excluded.session_check_enabled,
+      session_ttl_minutes = excluded.session_ttl_minutes,
+      tracking_urls = excluded.tracking_urls,
+      redirect_type = excluded.redirect_type,
+      custom_referrer_url = excluded.custom_referrer_url,
       status = excluded.status,
       click_count = excluded.click_count,
       total_conversions = excluded.total_conversions
@@ -315,6 +330,11 @@ export function saveOffer(offer: Offer): Offer {
     offer.triggerRepeatCount || 0,
     offer.frequencyCap || "unlimited",
     JSON.stringify(offer.targetPages || []),
+    offer.sessionCheckEnabled ? 1 : 0,
+    offer.sessionTtlMinutes || 1440,
+    JSON.stringify(offer.trackingUrls || []),
+    offer.redirectType || "302",
+    offer.customReferrerUrl || "",
     offer.status || "active",
     offer.clickCount || 0,
     offer.totalConversions || 0,
@@ -342,15 +362,16 @@ export function incrementOfferConversions(offerId: string): void {
 export function recordClick(click: Click): Click {
   db.prepare(`
     INSERT INTO clicks (
-      id, offer_id, pub_id, sub_id1, sub_id2, ip, country, city,
+      id, offer_id, session_id, pub_id, sub_id1, sub_id2, ip, country, city,
       device, os, browser, isp, user_agent, status, filter_reason, revenue, timestamp
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `).run(
     click._id,
     click.offerId,
+    click.sessionId || "",
     click.pubId || "",
     click.subId1 || "",
     click.subId2 || "",
@@ -516,7 +537,7 @@ export function removeBlacklistIp(ip: string): void {
 
 // Auth Database Operations
 export function getAdminUserByUsername(username: string) {
-  return db.prepare("SELECT * FROM admin_users WHERE username = ?").get(username) as any;
+  return db.prepare("SELECT * FROM admin_users WHERE LOWER(username) = LOWER(?)").get((username || "").trim()) as any;
 }
 
 // Stats & Aggregations
@@ -672,6 +693,11 @@ function mapOfferRow(r: any): Offer {
     triggerRepeatCount: r.trigger_repeat_count,
     frequencyCap: r.frequency_cap,
     targetPages: JSON.parse(r.target_pages || "[]"),
+    sessionCheckEnabled: Boolean(r.session_check_enabled),
+    sessionTtlMinutes: r.session_ttl_minutes || 1440,
+    trackingUrls: JSON.parse(r.tracking_urls || "[]"),
+    redirectType: r.redirect_type || "302",
+    customReferrerUrl: r.custom_referrer_url || "",
     status: r.status,
     clickCount,
     totalConversions,
@@ -684,6 +710,7 @@ function mapClickRow(r: any): Click {
   return {
     _id: r.id,
     offerId: r.offer_id,
+    sessionId: r.session_id || "",
     pubId: r.pub_id || "",
     subId1: r.sub_id1 || "",
     subId2: r.sub_id2 || "",

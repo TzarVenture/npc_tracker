@@ -1,10 +1,10 @@
-/* Offers.tsx: Campaign management, filtering rules, multi-event payouts, scheduling, and integration code generators. */
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Input, Select } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
+import { Switch } from "../components/ui/Switch";
 import {
   Plus,
   Search,
@@ -19,9 +19,12 @@ import {
   Code,
   Calendar,
   Layers,
-  Clock
+  Clock,
+  ShieldCheck,
+  Shuffle,
+  Globe
 } from "lucide-react";
-import { Offer, OfferEvent } from "../types";
+import { Offer, OfferEvent, TrackingUrlItem } from "../types";
 
 export default function Offers() {
   const [offers, setOffers] = useState<Offer[]>([]);
@@ -58,11 +61,25 @@ export default function Offers() {
     triggerIntervalMs: 0,
     triggerRepeatCount: 0,
     frequencyCap: "unlimited" as "unlimited" | "once_per_session" | "once_per_user",
+    sessionCheckEnabled: false,
+    sessionTtlMinutes: 1440,
+    trackingUrls: [] as TrackingUrlItem[],
+    redirectType: "302" as "302" | "307" | "meta" | "double_meta" | "custom_referrer",
+    customReferrerUrl: "",
     status: "active" as "active" | "paused"
   });
 
   // Event creation temporary form state
   const [newEvent, setNewEvent] = useState({ eventName: "", payout: 0, revenue: 0 });
+
+  // Tracking URL creation temporary form state
+  const [newTrackingUrl, setNewTrackingUrl] = useState({
+    name: "",
+    url: "",
+    weight: 50,
+    deviceType: "All" as "All" | "Mobile" | "Desktop",
+    status: "active" as "active" | "paused"
+  });
 
   useEffect(() => {
     fetchOffers();
@@ -111,6 +128,11 @@ export default function Offers() {
       triggerIntervalMs: Number(formData.triggerIntervalMs) || 0,
       triggerRepeatCount: Number(formData.triggerRepeatCount) || 0,
       frequencyCap: formData.frequencyCap,
+      sessionCheckEnabled: formData.sessionCheckEnabled,
+      sessionTtlMinutes: Number(formData.sessionTtlMinutes) || 1440,
+      trackingUrls: formData.trackingUrls,
+      redirectType: formData.redirectType,
+      customReferrerUrl: formData.customReferrerUrl,
       status: formData.status
     };
 
@@ -122,8 +144,9 @@ export default function Offers() {
       }
       closeDrawer();
       fetchOffers();
-    } catch (err) {
-      // Quiet fail
+    } catch (err: any) {
+      const errMsg = err.response?.data?.error || "Failed to save campaign. Please check your inputs or log in again.";
+      alert(errMsg);
     }
   };
 
@@ -154,6 +177,11 @@ export default function Offers() {
       triggerIntervalMs: offer.triggerIntervalMs || 0,
       triggerRepeatCount: offer.triggerRepeatCount || 0,
       frequencyCap: offer.frequencyCap || "unlimited",
+      sessionCheckEnabled: Boolean(offer.sessionCheckEnabled),
+      sessionTtlMinutes: offer.sessionTtlMinutes || 1440,
+      trackingUrls: offer.trackingUrls || [],
+      redirectType: offer.redirectType || "302",
+      customReferrerUrl: offer.customReferrerUrl || "",
       status: offer.status
     });
     setCurrentStep(1);
@@ -186,6 +214,33 @@ export default function Offers() {
     }));
   };
 
+  const handleAddTrackingUrl = () => {
+    if (!newTrackingUrl.name.trim() || !newTrackingUrl.url.trim()) {
+      alert("Label Name and Target URL are required for rotation.");
+      return;
+    }
+    const item: TrackingUrlItem = {
+      id: "url-" + Math.random().toString(36).substring(2, 9),
+      name: newTrackingUrl.name.trim(),
+      url: newTrackingUrl.url.trim(),
+      weight: Number(newTrackingUrl.weight) || 50,
+      deviceType: newTrackingUrl.deviceType,
+      status: newTrackingUrl.status
+    };
+    setFormData(prev => ({
+      ...prev,
+      trackingUrls: [...prev.trackingUrls, item]
+    }));
+    setNewTrackingUrl({ name: "", url: "", weight: 50, deviceType: "All", status: "active" });
+  };
+
+  const handleRemoveTrackingUrl = (id: string) => {
+    setFormData(prev => ({
+      ...prev,
+      trackingUrls: prev.trackingUrls.filter(u => u.id !== id)
+    }));
+  };
+
   const closeDrawer = () => {
     setShowDrawer(false);
     setEditingOfferId(null);
@@ -215,6 +270,11 @@ export default function Offers() {
       triggerIntervalMs: 0,
       triggerRepeatCount: 0,
       frequencyCap: "unlimited",
+      sessionCheckEnabled: false,
+      sessionTtlMinutes: 1440,
+      trackingUrls: [],
+      redirectType: "302",
+      customReferrerUrl: "",
       status: "active"
     });
   };
@@ -450,13 +510,14 @@ export default function Offers() {
             </div>
 
             {/* Step Tabs Indicator */}
-            <div className="flex border-b border-slate-100 text-xs font-bold text-slate-500">
-              {["1. General", "2. Targeting", "3. Capping & Schedule", "4. Multi-Events"].map((title, i) => (
+            <div className="flex border-b border-slate-100 text-xs font-semibold text-slate-500 overflow-x-auto">
+              {["1. General & Redirects", "2. Multi-URLs", "3. Session & Caps", "4. Targeting"].map((title, i) => (
                 <button
                   key={i}
+                  type="button"
                   onClick={() => setCurrentStep(i + 1)}
-                  className={`flex-1 py-3 border-b-2 text-center transition-colors ${
-                    currentStep === i + 1 ? "border-indigo-600 text-indigo-600" : "border-transparent"
+                  className={`flex-1 py-3 px-2 border-b-2 text-center whitespace-nowrap transition-colors ${
+                    currentStep === i + 1 ? "border-slate-900 text-slate-900 font-bold" : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}
                 >
                   {title}
@@ -466,6 +527,7 @@ export default function Offers() {
 
             {/* Form Steps */}
             <form onSubmit={handleCreateOrUpdate} className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* STEP 1: GENERAL & REDIRECT TYPES */}
               {currentStep === 1 && (
                 <div className="space-y-4">
                   <Input
@@ -476,7 +538,7 @@ export default function Offers() {
                     required
                   />
                   <Input
-                    label="Destination URL"
+                    label="Primary Destination URL"
                     placeholder="https://advertiser.com/landing?pub={pub_id}&sub1={sub_id1}"
                     value={formData.destinationUrl}
                     onChange={(e) => setFormData({ ...formData, destinationUrl: e.target.value })}
@@ -504,6 +566,35 @@ export default function Offers() {
                       onChange={(e) => setFormData({ ...formData, payout: Number(e.target.value) })}
                     />
                   </div>
+
+                  <div className="border border-indigo-100 bg-indigo-50/50 p-4 rounded-xl space-y-3">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                      <label className="font-bold text-slate-900 text-xs uppercase tracking-wider">Redirect Type & Referrer Hiding Mode</label>
+                    </div>
+                    <Select
+                      label=""
+                      value={formData.redirectType}
+                      onChange={(e) => setFormData({ ...formData, redirectType: e.target.value as any })}
+                      options={[
+                        { value: "302", label: "HTTP 302 Found (Standard - Preserves Referrer)" },
+                        { value: "307", label: "HTTP 307 Temporary (Strict - Preserves Method & Referrer)" },
+                        { value: "meta", label: "Meta Refresh (Strips Referrer Header)" },
+                        { value: "double_meta", label: "Double Meta Refresh (100% Blank Referrer)" },
+                        { value: "custom_referrer", label: "Send Custom / Spoofed Referrer URL" }
+                      ]}
+                    />
+
+                    {formData.redirectType === "custom_referrer" && (
+                      <Input
+                        label="Custom Referrer Domain / URL"
+                        placeholder="https://mycustombrand.com"
+                        value={formData.customReferrerUrl}
+                        onChange={(e) => setFormData({ ...formData, customReferrerUrl: e.target.value })}
+                      />
+                    )}
+                  </div>
+
                   <Select
                     label="Filter Violation Action"
                     value={formData.actionOnFilter}
@@ -518,7 +609,139 @@ export default function Offers() {
                 </div>
               )}
 
+              {/* STEP 2: MULTIPLE TRACKING URLS */}
               {currentStep === 2 && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Shuffle className="w-4 h-4 text-indigo-600" />
+                    <div>
+                      <label className="font-bold text-slate-900 text-xs uppercase tracking-wider block">Multiple Tracking URLs (Weighted Rotation)</label>
+                      <p className="text-xs text-slate-500">Configure split landing page URLs with percentage weights (e.g. 50% URL A, 50% URL B).</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                    <span className="font-semibold text-slate-700 text-xs block">Add Alternative Destination URL</span>
+                    <Input
+                      label="URL Label / Name"
+                      placeholder="e.g. Landing Page B - Promo"
+                      value={newTrackingUrl.name}
+                      onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, name: e.target.value })}
+                    />
+                    <Input
+                      label="Destination URL"
+                      placeholder="https://advertiser.com/landing-b?pub={pub_id}"
+                      value={newTrackingUrl.url}
+                      onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, url: e.target.value })}
+                    />
+                    <div className="grid grid-cols-2 gap-3 items-end">
+                      <Input
+                        label="Weight Percentage (0-100)"
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={newTrackingUrl.weight}
+                        onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, weight: Number(e.target.value) })}
+                      />
+                      <Button type="button" onClick={handleAddTrackingUrl} className="bg-indigo-600 hover:bg-indigo-500 text-xs gap-1">
+                        <Plus size={14} /> Add Rotation URL
+                      </Button>
+                    </div>
+                  </div>
+
+                  {formData.trackingUrls.length > 0 ? (
+                    <div className="space-y-2 border border-slate-200 rounded-xl overflow-hidden text-xs">
+                      {formData.trackingUrls.map((item) => (
+                        <div key={item.id} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100">
+                          <div className="min-w-0 flex-1 pr-2">
+                            <div className="font-bold text-slate-900 flex items-center gap-2">
+                              {item.name}
+                              <Badge variant="primary" className="bg-indigo-50 text-indigo-700 text-[10px]">
+                                Weight: {item.weight}%
+                              </Badge>
+                            </div>
+                            <div className="text-slate-500 font-mono truncate text-[11px] mt-0.5">{item.url}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTrackingUrl(item.id)}
+                            className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                      No additional rotation URLs added. Traffic will route 100% to Primary Destination URL.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* STEP 3: SESSION CHECK & CAPPING */}
+              {currentStep === 3 && (
+                <div className="space-y-4">
+                  <div className="border border-indigo-100 bg-indigo-50/50 p-4 rounded-xl space-y-3">
+                    <Switch
+                      checked={formData.sessionCheckEnabled}
+                      onChange={(val) => setFormData({ ...formData, sessionCheckEnabled: val })}
+                      label="Enable Session Validation (Session Check)"
+                      description="Requires incoming conversion postbacks to belong to a valid, non-expired click session token."
+                    />
+
+                    {formData.sessionCheckEnabled && (
+                      <Input
+                        label="Session Expiration Window TTL (Minutes)"
+                        type="number"
+                        placeholder="1440 (Default 24 Hours)"
+                        value={formData.sessionTtlMinutes}
+                        onChange={(e) => setFormData({ ...formData, sessionTtlMinutes: Number(e.target.value) })}
+                      />
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input
+                      label="Daily Click Cap (0 = Unlimited)"
+                      type="number"
+                      value={formData.dailyCap}
+                      onChange={(e) => setFormData({ ...formData, dailyCap: Number(e.target.value) })}
+                    />
+                    <Input
+                      label="Hourly Click Cap (0 = Unlimited)"
+                      type="number"
+                      value={formData.hourlyCap}
+                      onChange={(e) => setFormData({ ...formData, hourlyCap: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input
+                      label="Campaign Start Date/Time"
+                      type="datetime-local"
+                      value={formData.startDate}
+                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                    />
+                    <Input
+                      label="Campaign End Date/Time"
+                      type="datetime-local"
+                      value={formData.endDate}
+                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                    />
+                  </div>
+                  <Input
+                    label="Duplicate IP Filter Window (Minutes)"
+                    type="number"
+                    placeholder="e.g. 15 (Blocks repeat clicks within 15 mins)"
+                    value={formData.duplicateWindowMinutes}
+                    onChange={(e) => setFormData({ ...formData, duplicateWindowMinutes: Number(e.target.value) })}
+                  />
+                </div>
+              )}
+
+              {/* STEP 4: TARGETING */}
+              {currentStep === 4 && (
                 <div className="space-y-4">
                   <Input
                     label="Geo Country Codes (CSV)"
@@ -569,113 +792,18 @@ export default function Offers() {
                   />
                 </div>
               )}
-
-              {currentStep === 3 && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input
-                      label="Daily Click Cap (0 = Unlimited)"
-                      type="number"
-                      value={formData.dailyCap}
-                      onChange={(e) => setFormData({ ...formData, dailyCap: Number(e.target.value) })}
-                    />
-                    <Input
-                      label="Hourly Click Cap (0 = Unlimited)"
-                      type="number"
-                      value={formData.hourlyCap}
-                      onChange={(e) => setFormData({ ...formData, hourlyCap: Number(e.target.value) })}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input
-                      label="Campaign Start Date/Time"
-                      type="datetime-local"
-                      value={formData.startDate}
-                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                    />
-                    <Input
-                      label="Campaign End Date/Time"
-                      type="datetime-local"
-                      value={formData.endDate}
-                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                    />
-                  </div>
-                  <Input
-                    label="Duplicate IP Filter Window (Minutes)"
-                    type="number"
-                    placeholder="e.g. 15 (Blocks repeat clicks within 15 mins)"
-                    value={formData.duplicateWindowMinutes}
-                    onChange={(e) => setFormData({ ...formData, duplicateWindowMinutes: Number(e.target.value) })}
-                  />
-                </div>
-              )}
-
-              {currentStep === 4 && (
-                <div className="space-y-4">
-                  <label className="font-bold text-slate-800 text-xs uppercase tracking-wider block">Multi-Event Conversion Tiers</label>
-                  <p className="text-xs text-slate-500">Configure different payout/revenue rates for events like Install, Lead, or Sale.</p>
-
-                  <div className="grid grid-cols-3 gap-2 items-end bg-slate-50 p-3 rounded-lg border border-slate-200">
-                    <Input
-                      label="Event Name"
-                      placeholder="e.g. lead"
-                      value={newEvent.eventName}
-                      onChange={(e) => setNewEvent({ ...newEvent, eventName: e.target.value })}
-                    />
-                    <Input
-                      label="Payout ($)"
-                      type="number"
-                      step="0.1"
-                      value={newEvent.payout}
-                      onChange={(e) => setNewEvent({ ...newEvent, payout: Number(e.target.value) })}
-                    />
-                    <div className="flex gap-2">
-                      <Input
-                        label="Revenue ($)"
-                        type="number"
-                        step="0.1"
-                        value={newEvent.revenue}
-                        onChange={(e) => setNewEvent({ ...newEvent, revenue: Number(e.target.value) })}
-                      />
-                      <Button type="button" onClick={handleAddEvent} className="h-[42px] mt-auto">
-                        <Plus size={16} />
-                      </Button>
-                    </div>
-                  </div>
-
-                  {formData.eventsList.length > 0 && (
-                    <div className="space-y-2 border border-slate-200 rounded-lg overflow-hidden text-xs">
-                      {formData.eventsList.map((ev, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100">
-                          <div>
-                            <span className="font-bold text-slate-900 uppercase">{ev.eventName}</span>
-                            <span className="text-slate-500 ml-2">Rev: ${ev.revenue} | Pay: ${ev.payout}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveEvent(idx)}
-                            className="p-1 text-rose-500 hover:bg-rose-50 rounded"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </form>
 
             {/* Drawer Footer */}
             <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
               {currentStep > 1 ? (
-                <Button variant="outline" onClick={prevStep}>Previous</Button>
+                <Button type="button" variant="outline" onClick={() => setCurrentStep(currentStep - 1)}>Previous</Button>
               ) : <div />}
 
               {currentStep < 4 ? (
-                <Button onClick={nextStep}>Next Step</Button>
+                <Button type="button" onClick={() => setCurrentStep(currentStep + 1)}>Next Step</Button>
               ) : (
-                <Button onClick={handleCreateOrUpdate} className="bg-indigo-600 hover:bg-indigo-500">Save Campaign</Button>
+                <Button type="button" onClick={handleCreateOrUpdate} className="bg-indigo-600 hover:bg-indigo-500 font-bold px-6">Save Campaign</Button>
               )}
             </div>
           </div>

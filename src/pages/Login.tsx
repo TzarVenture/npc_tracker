@@ -1,9 +1,6 @@
-/* Login.tsx: Admin authentication login view. */
+/* Login.tsx: Enterprise Fluent UI admin authentication view. */
 import React, { useState } from "react";
 import axios from "axios";
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "../components/ui/Card";
-import { Button } from "../components/ui/Button";
-import { Input } from "../components/ui/Input";
 import { Lock, User as UserIcon, ShieldCheck, AlertCircle, ArrowRight } from "lucide-react";
 
 interface LoginProps {
@@ -43,80 +40,82 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 selection:bg-indigo-500 selection:text-white">
-      {/* Background radial highlight */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="w-full max-w-md relative z-10 space-y-6">
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 selection:bg-slate-800 selection:text-white">
+      <div className="w-full max-w-md space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-indigo-600 text-white font-mono font-black text-lg shadow-lg shadow-indigo-600/30">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-slate-900 text-white font-mono font-bold text-base shadow-sm border border-slate-800">
             NT
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">NPC_tracker Admin</h1>
-          <p className="text-xs text-slate-400">Enterprise Operations & Traffic Control Gateway</p>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-white">
+              NPC_tracker Admin
+            </h1>
+            <p className="text-xs text-slate-400 mt-0.5">Enterprise Operations & Traffic Control Gateway</p>
+          </div>
         </div>
 
-        {/* Login Card */}
-        <Card className="border-slate-800 bg-slate-900/80 backdrop-blur-md shadow-2xl">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-white text-base">Sign In</CardTitle>
-            <CardDescription className="text-slate-400 text-xs">Enter your administrator credentials to proceed.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-start gap-2.5">
-                  <AlertCircle size={16} className="shrink-0 text-rose-400 mt-0.5" />
-                  <span>{error}</span>
-                </div>
+        {/* Enterprise Login Card */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-7 shadow-xl space-y-6">
+          <div className="border-b border-slate-100 pb-4">
+            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+              Sign In
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">Enter your administrator credentials to proceed.</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
+                <AlertCircle size={16} className="shrink-0 text-rose-600 mt-0.5" />
+                <span className="font-medium">{error}</span>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700 block">Username</label>
+              <div className="relative">
+                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Admin username"
+                  className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700 block">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all font-medium"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer mt-2 text-sm"
+            >
+              {loading ? "Authenticating..." : (
+                <>
+                  Sign In <ArrowRight size={16} />
+                </>
               )}
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-300 block">Username</label>
-                <div className="relative">
-                  <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Admin username"
-                    className="w-full pl-9 pr-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-lg text-sm text-white placeholder:text-slate-600 outline-none focus:border-indigo-500 transition-colors"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-300 block">Password</label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••••••"
-                    className="w-full pl-9 pr-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-lg text-sm text-white placeholder:text-slate-600 outline-none focus:border-indigo-500 transition-colors"
-                  />
-                </div>
-              </div>
-
-              <Button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-lg gap-2 shadow-lg shadow-indigo-600/20 cursor-pointer mt-2"
-              >
-                {loading ? "Authenticating..." : (
-                  <>
-                    Sign In <ArrowRight size={16} />
-                  </>
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+            </button>
+          </form>
+        </div>
 
         {/* Footer info */}
-        <div className="text-center text-[11px] text-slate-500 flex items-center justify-center gap-1.5">
+        <div className="text-center text-[11px] font-medium text-slate-400 flex items-center justify-center gap-1.5">
           <ShieldCheck size={14} className="text-emerald-500" />
           <span>Protected by AES-256 JWT Authentication</span>
         </div>

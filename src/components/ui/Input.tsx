@@ -8,6 +8,8 @@ export interface InputProps {
   error?: string;
   type?: string;
   step?: string;
+  min?: string | number;
+  max?: string | number;
   placeholder?: string;
   value?: string | number;
   disabled?: boolean;
@@ -22,6 +24,8 @@ export function Input({
   error,
   type = "text",
   step,
+  min,
+  max,
   placeholder,
   value,
   disabled,
@@ -40,6 +44,8 @@ export function Input({
       <input
         type={type}
         step={step}
+        min={min}
+        max={max}
         placeholder={placeholder}
         value={value}
         disabled={disabled}

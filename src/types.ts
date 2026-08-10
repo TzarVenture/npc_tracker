@@ -6,6 +6,16 @@ export interface OfferEvent {
   revenue: number;
 }
 
+export interface TrackingUrlItem {
+  id: string;
+  name: string;
+  url: string;
+  weight: number; // 0 to 100
+  geoTargeting?: string[];
+  deviceType?: 'All' | 'Mobile' | 'Desktop';
+  status: 'active' | 'paused';
+}
+
 export interface Offer {
   _id: string;
   name: string;
@@ -32,6 +42,12 @@ export interface Offer {
   triggerRepeatCount?: number;
   frequencyCap?: 'unlimited' | 'once_per_session' | 'once_per_user';
   targetPages?: string[];
+  // New features: Session check, Multiple Tracking URLs, Redirect & Referrer Hiding
+  sessionCheckEnabled?: boolean;
+  sessionTtlMinutes?: number;
+  trackingUrls?: TrackingUrlItem[];
+  redirectType?: '302' | '307' | 'meta' | 'double_meta' | 'custom_referrer';
+  customReferrerUrl?: string;
   status: 'active' | 'paused';
   clickCount: number;
   totalConversions?: number;
@@ -55,6 +71,7 @@ export interface Conversion {
 export interface Click {
   _id: string;
   offerId: string;
+  sessionId?: string;
   pubId?: string;
   subId1?: string;
   subId2?: string;

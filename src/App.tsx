@@ -33,9 +33,9 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  // Attach Axios request interceptor for Authorization header
+  // Attach Axios request & response interceptors for Authorization header and auto-logout on expired token
   useEffect(() => {
-    const interceptor = axios.interceptors.request.use((config) => {
+    const reqInterceptor = axios.interceptors.request.use((config) => {
       const storedToken = localStorage.getItem("npc_token");
       if (storedToken) {
         config.headers["Authorization"] = `Bearer ${storedToken}`;
@@ -43,8 +43,22 @@ export default function App() {
       return config;
     });
 
+    const resInterceptor = axios.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+          localStorage.removeItem("npc_token");
+          localStorage.removeItem("npc_user");
+          setToken(null);
+          setUser(null);
+        }
+        return Promise.reject(error);
+      }
+    );
+
     return () => {
-      axios.interceptors.request.eject(interceptor);
+      axios.interceptors.request.eject(reqInterceptor);
+      axios.interceptors.response.eject(resInterceptor);
     };
   }, []);
 

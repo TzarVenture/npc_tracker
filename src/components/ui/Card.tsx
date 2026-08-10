@@ -10,18 +10,21 @@ export interface CardProps {
 }
 
 export function Card({ className = "", ...props }: CardProps) {
+  const hasBg = /\bbg-/.test(className);
+  const hasBorder = /\bborder-/.test(className);
   return (
     <div
-      className={`bg-white rounded-xl border border-slate-200 shadow-sm ${className}`}
+      className={`${hasBg ? "" : "bg-white"} ${hasBorder ? "" : "border border-slate-200"} rounded-2xl shadow-sm ${className}`}
       {...props}
     />
   );
 }
 
 export function CardHeader({ className = "", ...props }: CardProps) {
+  const hasBorder = /\bborder-/.test(className);
   return (
     <div
-      className={`px-6 py-4 border-b border-slate-100 flex justify-between items-center ${className}`}
+      className={`px-6 py-4 ${hasBorder ? "" : "border-b border-slate-100"} flex justify-between items-center ${className}`}
       {...props}
     />
   );

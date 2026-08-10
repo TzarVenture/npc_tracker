@@ -27,11 +27,11 @@ export function Button({
   const baseStyles = "inline-flex items-center justify-center gap-2 font-medium rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none cursor-pointer";
   
   const variants = {
-    primary: "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm focus:ring-indigo-500 border border-transparent",
-    outline: "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 shadow-sm focus:ring-slate-400",
-    ghost: "text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:ring-slate-300",
-    danger: "bg-rose-600 hover:bg-rose-700 text-white shadow-sm focus:ring-rose-500 border border-transparent",
-    success: "bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm focus:ring-emerald-500 border border-transparent"
+    primary: "bg-slate-900 hover:bg-slate-800 text-white shadow-xs focus:ring-slate-900 border border-transparent font-semibold",
+    outline: "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 shadow-xs focus:ring-slate-400 font-semibold",
+    ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus:ring-slate-300 font-semibold",
+    danger: "bg-rose-600 hover:bg-rose-700 text-white shadow-xs focus:ring-rose-500 border border-transparent font-semibold",
+    success: "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs focus:ring-emerald-500 border border-transparent font-semibold"
   };
 
   const sizes = {

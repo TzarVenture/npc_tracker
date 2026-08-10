@@ -184,7 +184,12 @@ app.post("/api/offers", authMiddleware, (req, res) => {
     triggerDelayMs,
     triggerIntervalMs,
     triggerRepeatCount,
-    frequencyCap
+    frequencyCap,
+    sessionCheckEnabled,
+    sessionTtlMinutes,
+    trackingUrls,
+    redirectType,
+    customReferrerUrl
   } = req.body;
 
   if (!name || !destinationUrl) {
@@ -217,6 +222,11 @@ app.post("/api/offers", authMiddleware, (req, res) => {
     triggerIntervalMs: Number(triggerIntervalMs) || 0,
     triggerRepeatCount: Number(triggerRepeatCount) || 0,
     frequencyCap: frequencyCap || "unlimited",
+    sessionCheckEnabled: sessionCheckEnabled === true || sessionCheckEnabled === "true",
+    sessionTtlMinutes: Number(sessionTtlMinutes) || 1440,
+    trackingUrls: Array.isArray(trackingUrls) ? trackingUrls : [],
+    redirectType: redirectType || "302",
+    customReferrerUrl: customReferrerUrl || "",
     status: "active",
     clickCount: 0,
     totalConversions: 0,
@@ -271,6 +281,16 @@ app.get("/api/postback", (req, res) => {
   }
 
   const offer = getOfferById(click.offerId);
+
+  // Session Check Validation
+  if (offer && offer.sessionCheckEnabled) {
+    const clickTime = new Date(click.timestamp).getTime();
+    const ttlMs = (offer.sessionTtlMinutes || 1440) * 60 * 1000;
+    if (Date.now() - clickTime > ttlMs) {
+      return res.status(403).json({ error: "Session validation failed: Session window expired" });
+    }
+  }
+
   const eventName = (event as string) || "default";
 
   // Check if custom multi-event rates exist
@@ -426,6 +446,127 @@ app.get("/api/stats/performance", (req, res) => {
   res.json(getHourlyPerformance());
 });
 
+// Helper to pick destination URL from offer trackingUrls by weight & targeting
+const selectDestinationUrl = (offer: Offer, geo: string, device: string): string => {
+  if (offer.trackingUrls && offer.trackingUrls.length > 0) {
+    const activeUrls = offer.trackingUrls.filter(u => {
+      if (u.status !== "active") return false;
+      if (u.deviceType && u.deviceType !== "All" && u.deviceType !== device) return false;
+      if (u.geoTargeting && u.geoTargeting.length > 0 && !u.geoTargeting.includes(geo)) return false;
+      return true;
+    });
+
+    if (activeUrls.length > 0) {
+      const totalWeight = activeUrls.reduce((sum, u) => sum + (Number(u.weight) || 0), 0);
+      if (totalWeight > 0) {
+        let random = Math.random() * totalWeight;
+        for (const item of activeUrls) {
+          const w = Number(item.weight) || 0;
+          if (random < w) {
+            return item.url;
+          }
+          random -= w;
+        }
+      }
+      return activeUrls[0].url;
+    }
+  }
+  return offer.destinationUrl;
+};
+
+// Redirect Execution Engine supporting 302, 307, Meta, Double Meta, and Custom Referrer Hiding
+const executeRedirect = (res: express.Response, offer: Offer, finalDest: string) => {
+  let targetUrl = finalDest;
+  if (!/^https?:\/\//i.test(targetUrl)) {
+    targetUrl = "http://" + targetUrl;
+  }
+
+  const redirectType = offer.redirectType || "302";
+
+  if (redirectType === "307") {
+    return res.redirect(307, targetUrl);
+  }
+
+  if (redirectType === "meta") {
+    return res.type("html").send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="refresh" content="0;url=${encodeURI(targetUrl)}">
+  <title>Redirecting...</title>
+</head>
+<body>
+  <script>window.location.replace(${JSON.stringify(targetUrl)});</script>
+</body>
+</html>
+    `);
+  }
+
+  if (redirectType === "double_meta") {
+    const cleanUrl = `/clean-redirect?dest=${encodeURIComponent(targetUrl)}`;
+    return res.type("html").send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="refresh" content="0;url=${encodeURI(cleanUrl)}">
+  <title>Redirecting...</title>
+</head>
+<body>
+  <script>window.location.replace(${JSON.stringify(cleanUrl)});</script>
+</body>
+</html>
+    `);
+  }
+
+  if (redirectType === "custom_referrer") {
+    const customRef = offer.customReferrerUrl || "";
+    return res.type("html").send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="${customRef ? 'origin' : 'no-referrer'}">
+  <title>Redirecting...</title>
+</head>
+<body>
+  <script>
+    ${customRef ? `try { history.replaceState(null, "", "${customRef}"); } catch(e) {}` : ''}
+    window.location.replace(${JSON.stringify(targetUrl)});
+  </script>
+</body>
+</html>
+    `);
+  }
+
+  // Default: HTTP 302
+  return res.redirect(302, targetUrl);
+};
+
+// Clean Redirect intermediate handler for Double Meta Refresh
+app.get("/clean-redirect", (req, res) => {
+  const dest = req.query.dest as string;
+  if (!dest) return res.status(400).send("<h1>Error: Missing destination</h1>");
+
+  res.type("html").send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="refresh" content="0;url=${encodeURI(dest)}">
+  <title>Redirecting...</title>
+</head>
+<body>
+  <script>window.location.replace(${JSON.stringify(dest)});</script>
+</body>
+</html>
+  `);
+});
+
 // Traffic Click Simulator
 app.post("/api/simulate", (req, res) => {
   const { offerId, ip, country, userAgent, pubId, subId1, subId2, city, isp } = req.body;
@@ -445,7 +586,7 @@ app.post("/api/simulate", (req, res) => {
 
   let status: "passed" | "filtered" | "capped" | "blocked" = "passed";
   let filterReason = "";
-  let finalUrl = offer.destinationUrl;
+  let finalUrl = selectDestinationUrl(offer, clientCountry, device);
 
   const nowIso = new Date().toISOString();
   const blacklist = getBlacklist();
@@ -684,7 +825,8 @@ app.get("/track", (req, res) => {
 
   let status: "passed" | "filtered" | "capped" | "blocked" = "passed";
   let filterReason = "";
-  let finalUrl = offer.destinationUrl;
+  let finalUrl = selectDestinationUrl(offer, geo.country, device);
+  const sessionId = "sess-" + Math.random().toString(36).substring(2, 9) + Math.random().toString(36).substring(2, 9);
   const nowIso = new Date().toISOString();
   const blacklist = getBlacklist();
 
@@ -742,6 +884,7 @@ app.get("/track", (req, res) => {
       const clickLog: Click = {
         _id: "click-" + Math.random().toString(36).substring(2, 9),
         offerId: offer._id,
+        sessionId,
         pubId: String(pub_id || ""),
         subId1: String(sub_id1 || ""),
         subId2: String(sub_id2 || ""),
@@ -772,6 +915,7 @@ app.get("/track", (req, res) => {
   const clickLog: Click = {
     _id: "click-" + Math.random().toString(36).substring(2, 9),
     offerId: offer._id,
+    sessionId,
     pubId: String(pub_id || ""),
     subId1: String(sub_id1 || ""),
     subId2: String(sub_id2 || ""),
@@ -800,7 +944,13 @@ app.get("/track", (req, res) => {
     finalDest = "http://" + finalDest;
   }
 
-  res.redirect(finalDest);
+  // Set session cookie
+  res.cookie("tracker_sess", sessionId, {
+    maxAge: (offer.sessionTtlMinutes || 1440) * 60 * 1000,
+    httpOnly: true
+  });
+
+  return executeRedirect(res, offer, finalDest);
 });
 
 // ==========================================
