@@ -6,6 +6,7 @@ import { createServer as createViteServer } from "vite";
 import geoip from "geoip-lite";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import {
   getAllOffers,
   getOfferById,
@@ -505,7 +506,9 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   }
 
   if (redirectType === "double_meta") {
-    const cleanUrl = `/clean-redirect?dest=${encodeURIComponent(targetUrl)}`;
+    // Cryptographically sign the target URL with HMAC to prevent arbitrary open redirects
+    const sig = crypto.createHmac("sha256", JWT_SECRET).update(targetUrl).digest("hex");
+    const cleanUrl = `/clean-redirect?dest=${encodeURIComponent(targetUrl)}&sig=${sig}`;
     return res.type("html").send(`
 <!DOCTYPE html>
 <html>
@@ -549,7 +552,25 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
 // Clean Redirect intermediate handler for Double Meta Refresh
 app.get("/clean-redirect", (req, res) => {
   const dest = req.query.dest as string;
-  if (!dest) return res.status(400).send("<h1>Error: Missing destination</h1>");
+  const sig = req.query.sig as string;
+
+  if (!dest) {
+    return res.status(400).send("<h1>Error: Missing destination</h1>");
+  }
+
+  // 1. Strict Protocol check to prevent protocol-relative/javascript scheme XSS exploits
+  if (!/^https?:\/\//i.test(dest)) {
+    return res.status(400).send("<h1>Error: Invalid destination protocol</h1>");
+  }
+
+  // 2. Cryptographic signature check to prevent open redirects
+  const expectedSig = crypto.createHmac("sha256", JWT_SECRET).update(dest).digest("hex");
+  if (!sig || sig !== expectedSig) {
+    return res.status(403).send("<h1>Error: Invalid redirect signature</h1>");
+  }
+
+  // Escaping the destination URL to prevent script context breakout/XSS (safe string serialization)
+  const escapedDest = JSON.stringify(dest).replace(/</g, '\\u003c');
 
   res.type("html").send(`
 <!DOCTYPE html>
@@ -561,7 +582,7 @@ app.get("/clean-redirect", (req, res) => {
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(dest)});</script>
+  <script>window.location.replace(${escapedDest});</script>
 </body>
 </html>
   `);
