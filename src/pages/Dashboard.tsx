@@ -18,6 +18,7 @@ import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Switch } from "../components/ui/Switch";
 import { Input, Select } from "../components/ui/Input";
+import { useToast } from "../components/ui/Toast";
 import {
   MousePointerClick,
   ShieldAlert,
@@ -41,6 +42,7 @@ import {
 import { Offer, Click, DashboardStats } from "../types";
 
 export default function Dashboard() {
+  const { showToast } = useToast();
   const [stats, setStats] = useState<DashboardStats>({
     totalOffers: 0,
     activeOffers: 0,
@@ -127,8 +129,8 @@ export default function Dashboard() {
       if (offersRes.data.length > 0 && !simFormData.offerId) {
         setSimFormData(prev => ({ ...prev, offerId: offersRes.data[0]._id }));
       }
-    } catch (err) {
-      // Quiet fail
+    } catch (err: any) {
+      if (!isSilent) showToast("error", "Failed to load dashboard", "Please refresh the page.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -151,15 +153,16 @@ export default function Dashboard() {
       const res = await axios.post("/api/global-tracking", { active });
       setGlobalTracking(res.data.globalTracking);
       fetchData(true);
-    } catch (err) {
-      // Quiet fail
+      showToast(active ? "success" : "warning", active ? "Global tracking enabled" : "Global tracking paused", active ? "All campaigns are now tracking traffic." : "No clicks will be processed until re-enabled.");
+    } catch (err: any) {
+      showToast("error", "Failed to toggle tracking", err?.response?.data?.error || "Please try again.");
     }
   };
 
   const runSimulation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!simFormData.offerId) {
-      alert("Please select a target campaign to simulate.");
+      showToast("warning", "No campaign selected", "Please select a target campaign to simulate.");
       return;
     }
 
@@ -183,7 +186,8 @@ export default function Dashboard() {
         setSimulating(false);
         fetchData(true);
       }, 700);
-    } catch (err) {
+    } catch (err: any) {
+      showToast("error", "Simulation failed", err?.response?.data?.error || "Please try again.");
       setSimulating(false);
     }
   };

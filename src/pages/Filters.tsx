@@ -5,12 +5,16 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "../co
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Input, Select } from "../components/ui/Input";
+import { useToast } from "../components/ui/Toast";
 import { Shield, ShieldCheck, Globe, Wifi, Settings, AlertTriangle, Monitor, Cpu, Plus, Trash2 } from "lucide-react";
 
 export default function Filters() {
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState("bots");
   const [blacklist, setBlacklist] = useState<string[]>([]);
   const [newIp, setNewIp] = useState("");
+  const [addingIp, setAddingIp] = useState(false);
+  const [removingIp, setRemovingIp] = useState<string | null>(null);
 
   useEffect(() => {
     if (activeTab === "blacklist") {
@@ -22,29 +26,45 @@ export default function Filters() {
     try {
       const res = await axios.get("/api/blacklist");
       setBlacklist(res.data);
-    } catch (err) {
-      // Quiet fail
+    } catch (err: any) {
+      showToast("error", "Failed to load blacklist", err?.response?.data?.error || "Please refresh.");
     }
   };
 
   const addIp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newIp.trim()) return;
+    const trimmed = newIp.trim();
+    if (!trimmed) return;
+    // Basic IP format validation
+    const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(trimmed);
+    const ipv6 = trimmed.includes(":");
+    if (!ipv4 && !ipv6) {
+      showToast("error", "Invalid IP address", `"${trimmed}" is not a valid IPv4 or IPv6 address.`);
+      return;
+    }
+    setAddingIp(true);
     try {
-      const res = await axios.post("/api/blacklist", { ip: newIp.trim() });
+      const res = await axios.post("/api/blacklist", { ip: trimmed });
       setBlacklist(res.data);
       setNewIp("");
-    } catch (err) {
-      // Quiet fail
+      showToast("success", "IP blacklisted", `${trimmed} will now be blocked across all campaigns.`);
+    } catch (err: any) {
+      showToast("error", "Failed to add IP", err?.response?.data?.error || "Please try again.");
+    } finally {
+      setAddingIp(false);
     }
   };
 
   const removeIp = async (ip: string) => {
+    setRemovingIp(ip);
     try {
       const res = await axios.delete(`/api/blacklist/${encodeURIComponent(ip)}`);
       setBlacklist(res.data);
-    } catch (err) {
-      // Quiet fail
+      showToast("success", "IP removed", `${ip} has been removed from the blacklist.`);
+    } catch (err: any) {
+      showToast("error", "Failed to remove IP", err?.response?.data?.error || "Please try again.");
+    } finally {
+      setRemovingIp(null);
     }
   };
 

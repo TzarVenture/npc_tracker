@@ -22,6 +22,7 @@ import Publishers from "./pages/Publishers";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import { Badge } from "./components/ui/Badge";
+import { ToastProvider } from "./components/ui/Toast";
 import { User } from "./types";
 
 export default function App() {
@@ -75,7 +76,11 @@ export default function App() {
   };
 
   if (!token) {
-    return <Login onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <ToastProvider>
+        <Login onLoginSuccess={handleLoginSuccess} />
+      </ToastProvider>
+    );
   }
 
   const navItems = [
@@ -88,6 +93,7 @@ export default function App() {
   ];
 
   return (
+    <ToastProvider>
     <div className="flex h-screen bg-slate-50 text-slate-900 font-sans select-none overflow-hidden">
       {/* Sidebar Navigation */}
       <aside
@@ -215,5 +221,6 @@ export default function App() {
         </main>
       </div>
     </div>
+    </ToastProvider>
   );
 }

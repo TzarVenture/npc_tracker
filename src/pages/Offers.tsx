@@ -5,6 +5,7 @@ import { Button } from "../components/ui/Button";
 import { Input, Select } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
 import { Switch } from "../components/ui/Switch";
+import { useToast } from "../components/ui/Toast";
 import {
   Plus,
   Search,
@@ -22,11 +23,15 @@ import {
   Clock,
   ShieldCheck,
   Shuffle,
-  Globe
+  Globe,
+  Pause,
+  Play,
+  RefreshCw
 } from "lucide-react";
 import { Offer, OfferEvent, TrackingUrlItem } from "../types";
 
 export default function Offers() {
+  const { showToast } = useToast();
   const [offers, setOffers] = useState<Offer[]>([]);
   const [showDrawer, setShowDrawer] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
@@ -34,6 +39,9 @@ export default function Offers() {
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedOfferForCode, setSelectedOfferForCode] = useState<Offer | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -89,15 +97,15 @@ export default function Offers() {
     try {
       const res = await axios.get("/api/offers");
       setOffers(res.data);
-    } catch (err) {
-      // Quiet fail if error
+    } catch (err: any) {
+      showToast("error", "Failed to load campaigns", err?.response?.data?.error || "Please refresh the page.");
     }
   };
 
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.destinationUrl) {
-      alert("Campaign Name and Destination URL are required.");
+    if (!formData.name.trim() || !formData.destinationUrl.trim()) {
+      showToast("error", "Required fields missing", "Campaign Name and Destination URL are required.");
       return;
     }
 
@@ -136,17 +144,22 @@ export default function Offers() {
       status: formData.status
     };
 
+    setSubmitting(true);
     try {
       if (editingOfferId) {
         await axios.put(`/api/offers/${editingOfferId}`, payload);
+        showToast("success", "Campaign updated!", `"${payload.name}" has been saved.`);
       } else {
         await axios.post("/api/offers", payload);
+        showToast("success", "Campaign created!", `"${payload.name}" is now active.`);
       }
       closeDrawer();
       fetchOffers();
     } catch (err: any) {
       const errMsg = err.response?.data?.error || "Failed to save campaign. Please check your inputs or log in again.";
-      alert(errMsg);
+      showToast("error", "Save failed", errMsg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -188,13 +201,32 @@ export default function Offers() {
     setShowDrawer(true);
   };
 
-  const handleDeleteOffer = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this campaign?")) return;
+  const handleDeleteOffer = async (id: string, name: string) => {
+    if (confirmDeleteId !== id) {
+      setConfirmDeleteId(id);
+      return;
+    }
+    setConfirmDeleteId(null);
     try {
       await axios.delete(`/api/offers/${id}`);
+      showToast("success", "Campaign deleted", `"${name}" has been permanently removed.`);
       fetchOffers();
-    } catch (err) {
-      // Quiet fail
+    } catch (err: any) {
+      showToast("error", "Delete failed", err?.response?.data?.error || "Please try again.");
+    }
+  };
+
+  const handleTogglePause = async (offer: Offer) => {
+    const newStatus = offer.status === "active" ? "paused" : "active";
+    setTogglingId(offer._id);
+    try {
+      await axios.put(`/api/offers/${offer._id}`, { ...offer, status: newStatus });
+      showToast("success", newStatus === "active" ? "Campaign activated" : "Campaign paused", `"${offer.name}" is now ${newStatus}.`);
+      fetchOffers();
+    } catch (err: any) {
+      showToast("error", "Status change failed", err?.response?.data?.error || "Please try again.");
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -216,7 +248,7 @@ export default function Offers() {
 
   const handleAddTrackingUrl = () => {
     if (!newTrackingUrl.name.trim() || !newTrackingUrl.url.trim()) {
-      alert("Label Name and Target URL are required for rotation.");
+      showToast("error", "URL fields missing", "Label Name and Target URL are required for rotation.");
       return;
     }
     const item: TrackingUrlItem = {
@@ -331,10 +363,10 @@ export default function Offers() {
           <table className="w-full text-left border-collapse whitespace-nowrap">
             <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-widest border-b border-slate-200/50">
               <tr>
-                <th className="px-6 py-4">Campaign</th>
+                             <th className="px-6 py-4">Campaign</th>
                 <th className="px-6 py-4">Status</th>
                 <th className="px-6 py-4">Caps & Schedule</th>
-                <th className="px-6 py-4 text-right">Metrics & Events</th>
+                <th className="px-6 py-4 text-right">Metrics</th>
                 <th className="px-6 py-4 text-center">Integration Code</th>
                 <th className="px-6 py-4 text-center">Manage</th>
               </tr>
@@ -388,11 +420,13 @@ export default function Offers() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="font-bold text-slate-900">${offer.revenue.toFixed(2)} Rev / ${offer.payout.toFixed(2)} Pay</div>
-                      <div className="text-[10px] text-slate-500 font-medium">
-                        {offer.events && offer.events.length > 0 ? (
+                      <div className="text-[10px] text-slate-500 font-medium mt-0.5">
+                        {offer.totalConversions !== undefined && offer.totalConversions > 0 ? (
+                          <span className="text-emerald-600 font-bold">{offer.totalConversions} conv • CR: {(offer.conversionRate || 0).toFixed(1)}%</span>
+                        ) : offer.events && offer.events.length > 0 ? (
                           <span className="text-indigo-600 font-bold">{offer.events.length} Custom Event Tiers</span>
                         ) : (
-                          "Default Single Payout"
+                          "No conversions yet"
                         )}
                       </div>
                     </td>
@@ -409,19 +443,52 @@ export default function Offers() {
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-1">
                         <button
+                          onClick={() => handleTogglePause(offer)}
+                          disabled={togglingId === offer._id}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            offer.status === "active"
+                              ? "text-slate-400 hover:text-amber-600 hover:bg-amber-50"
+                              : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
+                          }`}
+                          title={offer.status === "active" ? "Pause Campaign" : "Activate Campaign"}
+                        >
+                          {togglingId === offer._id
+                            ? <RefreshCw size={15} className="animate-spin" />
+                            : offer.status === "active"
+                              ? <Pause size={15} />
+                              : <Play size={15} />}
+                        </button>
+                        <button
                           onClick={() => handleEditClick(offer)}
                           className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
                           title="Edit Campaign"
                         >
                           <Edit size={16} />
                         </button>
-                        <button
-                          onClick={() => handleDeleteOffer(offer._id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Delete Campaign"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {confirmDeleteId === offer._id ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleDeleteOffer(offer._id, offer.name)}
+                              className="text-[10px] font-bold text-rose-600 hover:text-rose-800 border border-rose-200 hover:bg-rose-50 px-1.5 py-0.5 rounded transition-colors"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="text-[10px] font-bold text-slate-500 border border-slate-200 hover:bg-slate-50 px-1.5 py-0.5 rounded transition-colors"
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleDeleteOffer(offer._id, offer.name)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            title="Delete Campaign"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -803,7 +870,15 @@ export default function Offers() {
               {currentStep < 4 ? (
                 <Button type="button" onClick={() => setCurrentStep(currentStep + 1)}>Next Step</Button>
               ) : (
-                <Button type="button" onClick={handleCreateOrUpdate} className="bg-indigo-600 hover:bg-indigo-500 font-bold px-6">Save Campaign</Button>
+                <Button
+                  type="button"
+                  onClick={handleCreateOrUpdate}
+                  className="bg-indigo-600 hover:bg-indigo-500 font-bold px-6 gap-2"
+                  disabled={submitting}
+                >
+                  {submitting ? <RefreshCw size={14} className="animate-spin" /> : null}
+                  {submitting ? "Saving..." : "Save Campaign"}
+                </Button>
               )}
             </div>
           </div>

@@ -28,6 +28,10 @@ import {
   getHourlyPerformance,
   getPublishersStats,
   getAdminUserByUsername,
+  updateAdminPassword,
+  getAllPublishers,
+  savePublisher,
+  deletePublisher,
   getClicksTodayCount,
   getClicksHourlyCount,
   hasRecentClickFromIp,
@@ -38,6 +42,44 @@ import { Offer, Click, Conversion } from "./src/types";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+
+// Warn if JWT secret is the insecure hardcoded fallback
+if (!process.env.JWT_SECRET) {
+  console.warn("\n  ⚠️  WARNING: JWT_SECRET is not set in .env — using insecure default. Set a strong secret before production deployment!\n");
+}
+
+// ==========================================
+// IN-MEMORY LOGIN RATE LIMITER (Brute-Force Protection)
+// Max 10 failed attempts per IP per 15 minutes
+// ==========================================
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+function checkRateLimit(ip: string): { blocked: boolean; remaining: number } {
+  const now = Date.now();
+  let entry = loginAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    loginAttempts.set(ip, entry);
+  }
+  const remaining = Math.max(0, RATE_LIMIT_MAX - entry.count);
+  return { blocked: entry.count >= RATE_LIMIT_MAX, remaining };
+}
+
+function recordFailedAttempt(ip: string): void {
+  const now = Date.now();
+  let entry = loginAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  }
+  entry.count += 1;
+  loginAttempts.set(ip, entry);
+}
+
+function clearAttempts(ip: string): void {
+  loginAttempts.delete(ip);
+}
 
 app.use(cors());
 app.use(express.json());
@@ -100,7 +142,14 @@ const getGeoFromIp = (ip: string) => {
 // ==========================================
 
 app.post("/api/auth/login", (req, res) => {
+  const clientIp = (req.headers["x-forwarded-for"] as string || req.ip || "unknown").split(",")[0].trim();
   const { username, password } = req.body;
+
+  // Check rate limit before any DB lookup
+  const rateCheck = checkRateLimit(clientIp);
+  if (rateCheck.blocked) {
+    return res.status(429).json({ error: "Too many failed login attempts. Try again in 15 minutes." });
+  }
 
   if (!username || !password) {
     return res.status(400).json({ error: "Username and password are required" });
@@ -108,14 +157,17 @@ app.post("/api/auth/login", (req, res) => {
 
   const user = getAdminUserByUsername(username);
   if (!user) {
+    recordFailedAttempt(clientIp);
     return res.status(401).json({ error: "Invalid username or password" });
   }
 
   const isMatch = bcrypt.compareSync(password, user.password_hash);
   if (!isMatch) {
+    recordFailedAttempt(clientIp);
     return res.status(401).json({ error: "Invalid username or password" });
   }
 
+  clearAttempts(clientIp);
   const token = jwt.sign(
     { id: user.id, username: user.username, role: user.role },
     JWT_SECRET,
@@ -131,6 +183,32 @@ app.post("/api/auth/login", (req, res) => {
 
 app.get("/api/auth/me", authMiddleware, (req: AuthenticatedRequest, res) => {
   res.json({ success: true, user: req.user });
+});
+
+// Change Admin Password (requires current password verification)
+app.post("/api/auth/change-password", authMiddleware, (req: AuthenticatedRequest, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: "Current password and new password are required." });
+  }
+  if (typeof newPassword !== "string" || newPassword.length < 8) {
+    return res.status(400).json({ error: "New password must be at least 8 characters." });
+  }
+
+  const user = getAdminUserByUsername(req.user!.username);
+  if (!user) {
+    return res.status(404).json({ error: "User not found." });
+  }
+
+  const isMatch = bcrypt.compareSync(currentPassword, user.password_hash);
+  if (!isMatch) {
+    return res.status(401).json({ error: "Current password is incorrect." });
+  }
+
+  const newHash = bcrypt.hashSync(newPassword, 12);
+  updateAdminPassword(user.id, newHash);
+  res.json({ success: true, message: "Password updated successfully." });
 });
 
 // ==========================================
@@ -344,8 +422,10 @@ app.get("/api/clicks", (req, res) => {
   const offerId = req.query.offerId as string;
   const status = req.query.status as string;
   const search = req.query.search as string;
+  const startDate = req.query.startDate as string;
+  const endDate = req.query.endDate as string;
 
-  res.json(getClicksPaginated(page, limit, offerId, status, search));
+  res.json(getClicksPaginated(page, limit, offerId, status, search, startDate, endDate));
 });
 
 // Stream Server-Side CSV Export
@@ -353,8 +433,10 @@ app.get("/api/clicks/export", authMiddleware, (req, res) => {
   const offerId = req.query.offerId as string;
   const status = req.query.status as string;
   const search = req.query.search as string;
+  const startDate = req.query.startDate as string;
+  const endDate = req.query.endDate as string;
 
-  const allClicks = getAllClicksFiltered(offerId, status, search);
+  const allClicks = getAllClicksFiltered(offerId, status, search, startDate, endDate);
   const offers = getAllOffers();
 
   const getCampaignName = (oId: string) => {
@@ -416,8 +498,53 @@ app.get("/api/conversions", (req, res) => {
   res.json(getConversionsPaginated(page, limit));
 });
 
+// Publishers API — Full Persistent CRUD
 app.get("/api/publishers", (req, res) => {
-  res.json(getPublishersStats());
+  const registered = getAllPublishers();
+  const stats = getPublishersStats();
+  // Merge registered publisher names with live click stats
+  const statsMap = new Map(stats.map((s: any) => [s.id, s]));
+  const enriched = registered.map(p => {
+    const s = statsMap.get(p.pubId) || { clickCount: 0, passed: 0, filtered: 0, revenue: 0, payout: 0 };
+    return { ...p, ...s, id: p.pubId, name: p.name };
+  });
+  // Also include pub IDs from click history that are NOT registered
+  const registeredIds = new Set(registered.map(p => p.pubId));
+  const unregistered = stats
+    .filter((s: any) => !registeredIds.has(s.id) && s.id !== "Direct")
+    .map((s: any) => ({ ...s, name: s.id }));
+  res.json([...enriched, ...unregistered]);
+});
+
+app.post("/api/publishers", authMiddleware, (req, res) => {
+  const { pubId, name } = req.body;
+  if (!pubId || !pubId.trim()) {
+    return res.status(400).json({ error: "Publisher ID (pub_id) is required." });
+  }
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: "Publisher Name is required." });
+  }
+  const publisher = {
+    id: "pub-" + Math.random().toString(36).substring(2, 9),
+    pubId: pubId.trim().toUpperCase(),
+    name: name.trim(),
+    createdAt: new Date().toISOString()
+  };
+  try {
+    const saved = savePublisher(publisher);
+    res.status(201).json(saved);
+  } catch (err: any) {
+    if (err.message && err.message.includes("UNIQUE")) {
+      return res.status(409).json({ error: `Publisher ID "${publisher.pubId}" already exists.` });
+    }
+    res.status(500).json({ error: "Failed to save publisher." });
+  }
+});
+
+app.delete("/api/publishers/:id", authMiddleware, (req, res) => {
+  const { id } = req.params;
+  deletePublisher(id);
+  res.json({ success: true, message: "Publisher removed." });
 });
 
 app.get("/api/blacklist", (req, res) => {

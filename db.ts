@@ -100,6 +100,13 @@ export function initDB() {
       value TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS publishers (
+      id TEXT PRIMARY KEY,
+      pub_id TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     -- Create performance indexes for real-time tracking lookups
     CREATE INDEX IF NOT EXISTS idx_clicks_offer ON clicks(offer_id);
     CREATE INDEX IF NOT EXISTS idx_clicks_timestamp ON clicks(timestamp);
@@ -392,7 +399,7 @@ export function recordClick(click: Click): Click {
   return click;
 }
 
-export function getClicksPaginated(page = 1, limit = 20, offerId?: string, status?: string, search?: string) {
+export function getClicksPaginated(page = 1, limit = 20, offerId?: string, status?: string, search?: string, startDate?: string, endDate?: string) {
   let whereClauses: string[] = [];
   let params: any[] = [];
 
@@ -408,6 +415,14 @@ export function getClicksPaginated(page = 1, limit = 20, offerId?: string, statu
     whereClauses.push("(ip LIKE ? OR pub_id LIKE ? OR sub_id1 LIKE ? OR country LIKE ?)");
     const term = `%${search.trim()}%`;
     params.push(term, term, term, term);
+  }
+  if (startDate && startDate.trim()) {
+    whereClauses.push("timestamp >= ?");
+    params.push(startDate.trim());
+  }
+  if (endDate && endDate.trim()) {
+    whereClauses.push("timestamp <= ?");
+    params.push(endDate.trim());
   }
 
   const whereSql = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
@@ -426,7 +441,7 @@ export function getClicksPaginated(page = 1, limit = 20, offerId?: string, statu
   };
 }
 
-export function getAllClicksFiltered(offerId?: string, status?: string, search?: string): Click[] {
+export function getAllClicksFiltered(offerId?: string, status?: string, search?: string, startDate?: string, endDate?: string): Click[] {
   let whereClauses: string[] = [];
   let params: any[] = [];
 
@@ -442,6 +457,14 @@ export function getAllClicksFiltered(offerId?: string, status?: string, search?:
     whereClauses.push("(ip LIKE ? OR pub_id LIKE ? OR sub_id1 LIKE ? OR country LIKE ?)");
     const term = `%${search.trim()}%`;
     params.push(term, term, term, term);
+  }
+  if (startDate && startDate.trim()) {
+    whereClauses.push("timestamp >= ?");
+    params.push(startDate.trim());
+  }
+  if (endDate && endDate.trim()) {
+    whereClauses.push("timestamp <= ?");
+    params.push(endDate.trim());
   }
 
   const whereSql = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
@@ -538,6 +561,39 @@ export function removeBlacklistIp(ip: string): void {
 // Auth Database Operations
 export function getAdminUserByUsername(username: string) {
   return db.prepare("SELECT * FROM admin_users WHERE LOWER(username) = LOWER(?)").get((username || "").trim()) as any;
+}
+
+export function updateAdminPassword(userId: string, newPasswordHash: string): void {
+  db.prepare("UPDATE admin_users SET password_hash = ? WHERE id = ?").run(newPasswordHash, userId);
+}
+
+// Publishers CRUD
+export interface Publisher {
+  id: string;
+  pubId: string;
+  name: string;
+  createdAt: string;
+}
+
+export function getAllPublishers(): Publisher[] {
+  const rows = db.prepare("SELECT * FROM publishers ORDER BY created_at DESC").all() as any[];
+  return rows.map(r => ({ id: r.id, pubId: r.pub_id, name: r.name, createdAt: r.created_at }));
+}
+
+export function savePublisher(publisher: Publisher): Publisher {
+  db.prepare(
+    "INSERT INTO publishers (id, pub_id, name, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(pub_id) DO UPDATE SET name = excluded.name"
+  ).run(publisher.id, publisher.pubId, publisher.name, publisher.createdAt);
+  return publisher;
+}
+
+export function deletePublisher(id: string): void {
+  db.prepare("DELETE FROM publishers WHERE id = ?").run(id);
+}
+
+export function getPublisherByPubId(pubId: string): Publisher | undefined {
+  const row = db.prepare("SELECT * FROM publishers WHERE pub_id = ?").get(pubId) as any;
+  return row ? { id: row.id, pubId: row.pub_id, name: row.name, createdAt: row.created_at } : undefined;
 }
 
 // Stats & Aggregations
