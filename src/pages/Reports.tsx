@@ -1,10 +1,11 @@
-/* Reports.tsx: Real-time traffic log viewer, conversions ledger, and full server-side CSV log exporter. */
+/* Reports.tsx: Real-time traffic log viewer, conversions ledger, date-range filtering, and full server-side CSV log exporter. */
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Select } from "../components/ui/Input";
+import { useToast } from "../components/ui/Toast";
 import {
   FileText,
   Search,
@@ -15,11 +16,13 @@ import {
   ChevronRight,
   Copy,
   Zap,
-  MousePointerClick
+  MousePointerClick,
+  Calendar
 } from "lucide-react";
 import { Click, Offer, Conversion } from "../types";
 
 export default function Reports() {
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<"clicks" | "conversions">("clicks");
   const [clicks, setClicks] = useState<Click[]>([]);
   const [conversions, setConversions] = useState<Conversion[]>([]);
@@ -35,6 +38,8 @@ export default function Reports() {
   const [search, setSearch] = useState("");
   const [selectedOffer, setSelectedOffer] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("all");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const copyToClipboard = (text: string, id: string) => {
@@ -46,9 +51,11 @@ export default function Reports() {
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
+      const dateParams = startDate ? `&startDate=${encodeURIComponent(startDate)}` : "";
+      const dateEndParams = endDate ? `&endDate=${encodeURIComponent(endDate + ":59")}` : "";
       if (activeTab === "clicks") {
         const [clicksRes, offersRes] = await Promise.all([
-          axios.get(`/api/clicks?page=${page}&limit=${limit}&offerId=${selectedOffer}&status=${selectedStatus}&search=${encodeURIComponent(search)}`),
+          axios.get(`/api/clicks?page=${page}&limit=${limit}&offerId=${selectedOffer}&status=${selectedStatus}&search=${encodeURIComponent(search)}${dateParams}${dateEndParams}`),
           axios.get("/api/offers")
         ]);
         setClicks(clicksRes.data.data);
@@ -63,12 +70,12 @@ export default function Reports() {
         setTotalRecords(convRes.data.total);
         setOffers(offersRes.data);
       }
-    } catch (err) {
-      // Quiet fail
+    } catch (err: any) {
+      showToast("error", "Failed to load log data", err?.response?.data?.error || "Check your network connection.");
     } finally {
       setLoading(false);
     }
-  }, [activeTab, page, limit, selectedOffer, selectedStatus, search]);
+  }, [activeTab, page, limit, selectedOffer, selectedStatus, search, startDate, endDate]);
 
   useEffect(() => {
     fetchLogs();
@@ -82,8 +89,10 @@ export default function Reports() {
   // FULL SERVER-SIDE CSV EXPORT
   const exportFullCSV = async () => {
     try {
+      const dateParams = startDate ? `&startDate=${encodeURIComponent(startDate)}` : "";
+      const dateEndParams = endDate ? `&endDate=${encodeURIComponent(endDate + ":59")}` : "";
       const response = await axios.get(
-        `/api/clicks/export?offerId=${selectedOffer}&status=${selectedStatus}&search=${encodeURIComponent(search)}`,
+        `/api/clicks/export?offerId=${selectedOffer}&status=${selectedStatus}&search=${encodeURIComponent(search)}${dateParams}${dateEndParams}`,
         { responseType: "blob" }
       );
 
@@ -94,9 +103,19 @@ export default function Reports() {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-    } catch (err) {
-      alert("Failed to export server CSV.");
+      showToast("success", "CSV export started!", "Check your downloads folder.");
+    } catch (err: any) {
+      showToast("error", "CSV export failed", err?.response?.data?.error || "Please try again.");
     }
+  };
+
+  const handleClearFilters = () => {
+    setSearch("");
+    setSelectedOffer("all");
+    setSelectedStatus("all");
+    setStartDate("");
+    setEndDate("");
+    setPage(1);
   };
 
   const totalPages = Math.ceil(totalRecords / limit) || 1;
@@ -137,47 +156,80 @@ export default function Reports() {
       {/* Filter Toolbar Card (Only for Clicks) */}
       {activeTab === "clicks" && (
         <Card>
-          <CardContent className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-            <div className="relative">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Search Keywords</label>
+          <CardContent className="p-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                <input
-                  type="text"
-                  placeholder="Search IP, PubID, Geo..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 pr-4 py-2 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all placeholder:text-slate-400"
-                />
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Search Keywords</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                  <input
+                    type="text"
+                    placeholder="IP, PubID, Country..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-9 pr-4 py-2 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all placeholder:text-slate-400"
+                  />
+                </div>
               </div>
+
+              <Select
+                label="Campaign filter"
+                value={selectedOffer}
+                onChange={(e) => setSelectedOffer(e.target.value)}
+                options={[
+                  { value: "all", label: "All Campaigns" },
+                  ...offers.map((o) => ({ value: o._id, label: o.name }))
+                ]}
+              />
+
+              <Select
+                label="Routing Status"
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                options={[
+                  { value: "all", label: "All Statuses" },
+                  { value: "passed", label: "Passed" },
+                  { value: "filtered", label: "Filtered" },
+                  { value: "capped", label: "Capped" },
+                  { value: "blocked", label: "Blocked" }
+                ]}
+              />
+
+              <Button variant="outline" onClick={fetchLogs} className="gap-2 w-full text-slate-700 bg-white">
+                <ArrowUpDown size={14} /> Refresh Logs
+              </Button>
             </div>
 
-            <Select
-              label="Campaign filter"
-              value={selectedOffer}
-              onChange={(e) => setSelectedOffer(e.target.value)}
-              options={[
-                { value: "all", label: "All Campaigns" },
-                ...offers.map((o) => ({ value: o._id, label: o.name }))
-              ]}
-            />
-
-            <Select
-              label="Routing Status"
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              options={[
-                { value: "all", label: "All Statuses" },
-                { value: "passed", label: "Passed" },
-                { value: "filtered", label: "Filtered" },
-                { value: "capped", label: "Capped" },
-                { value: "blocked", label: "Blocked" }
-              ]}
-            />
-
-            <Button variant="outline" onClick={fetchLogs} className="gap-2 w-full text-slate-700 bg-white">
-              <ArrowUpDown size={14} /> Refresh Logs
-            </Button>
+            {/* Date Range Row */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end pt-1 border-t border-slate-100">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1.5">
+                  <Calendar size={10} /> From Date
+                </label>
+                <input
+                  type="datetime-local"
+                  value={startDate}
+                  onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all text-slate-700"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1.5">
+                  <Calendar size={10} /> To Date
+                </label>
+                <input
+                  type="datetime-local"
+                  value={endDate}
+                  onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all text-slate-700"
+                />
+              </div>
+              {(startDate || endDate || search || selectedOffer !== "all" || selectedStatus !== "all") && (
+                <Button variant="outline" onClick={handleClearFilters} className="text-slate-500 gap-1.5">
+                  Clear Filters
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
