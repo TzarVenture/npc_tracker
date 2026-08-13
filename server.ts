@@ -219,7 +219,7 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", globalTracking: getGlobalTrackingState() });
 });
 
-app.get("/api/global-tracking", (req, res) => {
+app.get("/api/global-tracking", authMiddleware, (req, res) => {
   res.json({ globalTracking: getGlobalTrackingState() });
 });
 
@@ -233,7 +233,7 @@ app.post("/api/global-tracking", authMiddleware, (req, res) => {
 // CAMPAIGN / OFFER MANAGEMENT (CRUD)
 // ==========================================
 
-app.get("/api/offers", (req, res) => {
+app.get("/api/offers", authMiddleware, (req, res) => {
   res.json(getAllOffers());
 });
 
@@ -407,16 +407,16 @@ app.get("/api/postback", (req, res) => {
 // ANALYTICS & REPORTING ENDPOINTS
 // ==========================================
 
-app.get("/api/stats", (req, res) => {
+app.get("/api/stats", authMiddleware, (req, res) => {
   res.json(getDashboardStats());
 });
 
-app.get("/api/stats/live", (req, res) => {
+app.get("/api/stats/live", authMiddleware, (req, res) => {
   const limit = parseInt(req.query.limit as string) || 20;
   res.json(getClicksPaginated(1, limit).data);
 });
 
-app.get("/api/clicks", (req, res) => {
+app.get("/api/clicks", authMiddleware, (req, res) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
   const offerId = req.query.offerId as string;
@@ -491,7 +491,7 @@ app.get("/api/clicks/export", authMiddleware, (req, res) => {
   res.status(200).send(csvContent);
 });
 
-app.get("/api/conversions", (req, res) => {
+app.get("/api/conversions", authMiddleware, (req, res) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
 
@@ -499,7 +499,7 @@ app.get("/api/conversions", (req, res) => {
 });
 
 // Publishers API — Full Persistent CRUD
-app.get("/api/publishers", (req, res) => {
+app.get("/api/publishers", authMiddleware, (req, res) => {
   const registered = getAllPublishers();
   const stats = getPublishersStats();
   // Merge registered publisher names with live click stats
@@ -547,7 +547,7 @@ app.delete("/api/publishers/:id", authMiddleware, (req, res) => {
   res.json({ success: true, message: "Publisher removed." });
 });
 
-app.get("/api/blacklist", (req, res) => {
+app.get("/api/blacklist", authMiddleware, (req, res) => {
   res.json(getBlacklist());
 });
 
@@ -565,11 +565,11 @@ app.delete("/api/blacklist/:ip", authMiddleware, (req, res) => {
   res.json(getBlacklist());
 });
 
-app.get("/api/stats/geos", (req, res) => {
+app.get("/api/stats/geos", authMiddleware, (req, res) => {
   res.json(getGeoStats());
 });
 
-app.get("/api/stats/performance", (req, res) => {
+app.get("/api/stats/performance", authMiddleware, (req, res) => {
   res.json(getHourlyPerformance());
 });
 
@@ -695,7 +695,7 @@ app.get("/clean-redirect", (req, res) => {
 });
 
 // Traffic Click Simulator
-app.post("/api/simulate", (req, res) => {
+app.post("/api/simulate", authMiddleware, (req, res) => {
   const { offerId, ip, country, userAgent, pubId, subId1, subId2, city, isp } = req.body;
 
   const offer = getOfferById(offerId);

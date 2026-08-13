@@ -1,0 +1,4 @@
+## 2026-08-13 - Securing Administrative Endpoints with Proper Authentication
+**Vulnerability:** Critical administrative and statistical REST endpoints were completely public without JWT validation, exposing campaign metrics, complete visitor click streams (containing IP addresses and geo location), IP blacklist configurations, and conversion telemetry. Additionally, a public `/api/simulate` endpoint allowed unauthenticated simulation clicks, risking database denial of service (DoS) and analytics distortion.
+**Learning:** Endpoints were developed under the assumption that they are safe if they only perform `GET` queries or are hidden/rendered within a client-side protected page. However, security cannot rely on obfuscation or client-side routing.
+**Prevention:** Enforce `authMiddleware` on all endpoints that return administrative data, dashboard statistics, or modify state, explicitly separating public webhook/redirect endpoints from internal management APIs.
