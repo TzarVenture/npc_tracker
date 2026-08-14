@@ -156,7 +156,8 @@ export default function Offers() {
       closeDrawer();
       fetchOffers();
     } catch (err: any) {
-      const errMsg = err.response?.data?.error || "Failed to save campaign. Please check your inputs or log in again.";
+      const raw = err.response?.data?.error || err.response?.data || err.message;
+      const errMsg = typeof raw === "string" ? raw : (raw?.message || "Failed to save campaign. Please check your inputs or log in again.");
       showToast("error", "Save failed", errMsg);
     } finally {
       setSubmitting(false);
