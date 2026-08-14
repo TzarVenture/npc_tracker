@@ -601,6 +601,16 @@ const selectDestinationUrl = (offer: Offer, geo: string, device: string): string
   return offer.destinationUrl;
 };
 
+// Helper to stringify JSON safely within HTML <script> context to prevent XSS
+const safeJsonStringify = (val: any): string => {
+  return JSON.stringify(val)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/\//g, "\\/")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+};
+
 // Redirect Execution Engine supporting 302, 307, Meta, Double Meta, and Custom Referrer Hiding
 const executeRedirect = (res: express.Response, offer: Offer, finalDest: string) => {
   let targetUrl = finalDest;
@@ -625,7 +635,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(targetUrl)});</script>
+  <script>window.location.replace(${safeJsonStringify(targetUrl)});</script>
 </body>
 </html>
     `);
@@ -643,7 +653,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(cleanUrl)});</script>
+  <script>window.location.replace(${safeJsonStringify(cleanUrl)});</script>
 </body>
 </html>
     `);
@@ -661,8 +671,8 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
 </head>
 <body>
   <script>
-    ${customRef ? `try { history.replaceState(null, "", "${customRef}"); } catch(e) {}` : ''}
-    window.location.replace(${JSON.stringify(targetUrl)});
+    ${customRef ? `try { history.replaceState(null, "", ${safeJsonStringify(customRef)}); } catch(e) {}` : ''}
+    window.location.replace(${safeJsonStringify(targetUrl)});
   </script>
 </body>
 </html>
@@ -676,7 +686,11 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
 // Clean Redirect intermediate handler for Double Meta Refresh
 app.get("/clean-redirect", (req, res) => {
   const dest = req.query.dest as string;
-  if (!dest) return res.status(400).send("<h1>Error: Missing destination</h1>");
+
+  // Validate that dest is a valid absolute HTTP or HTTPS URL to prevent open redirect abuse and javascript: protocol execution
+  if (!dest || !/^https?:\/\//i.test(dest)) {
+    return res.status(400).send("<h1>Error: Invalid or missing destination URL</h1>");
+  }
 
   res.type("html").send(`
 <!DOCTYPE html>
@@ -688,7 +702,7 @@ app.get("/clean-redirect", (req, res) => {
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(dest)});</script>
+  <script>window.location.replace(${safeJsonStringify(dest)});</script>
 </body>
 </html>
   `);
