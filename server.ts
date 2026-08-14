@@ -127,13 +127,13 @@ const isBot = (ua: string) => {
 // Country/City mapping using geoip-lite
 const getGeoFromIp = (ip: string) => {
   const cleanIp = (ip || "").trim();
-  if (cleanIp === "127.0.0.1" || cleanIp === "::1" || cleanIp.startsWith("192.168.")) {
-    return { country: "US", city: "Localhost" };
+  if (cleanIp === "127.0.0.1" || cleanIp === "::1" || cleanIp.startsWith("192.168.") || cleanIp.startsWith("10.")) {
+    return { country: "IN", city: "Mumbai" };
   }
   const geo = geoip.lookup(cleanIp);
   return {
-    country: geo ? geo.country : "Unknown",
-    city: (geo && geo.city) ? geo.city : "Unknown"
+    country: geo ? geo.country : "IN",
+    city: (geo && geo.city) ? geo.city : "Mumbai"
   };
 };
 
