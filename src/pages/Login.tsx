@@ -30,10 +30,19 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         localStorage.setItem("npc_user", JSON.stringify(res.data.user));
         onLoginSuccess(res.data.token, res.data.user);
       } else {
-        setError(res.data.error || "Login failed.");
+        const rawErr = res.data?.error;
+        const msg = typeof rawErr === "string" ? rawErr : (rawErr?.message || "Login failed.");
+        setError(msg);
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || "Invalid credentials or connection error.");
+      const rawError = err.response?.data?.error || err.response?.data || err.message;
+      let errorMsg = "Invalid credentials or connection error.";
+      if (typeof rawError === "string") {
+        errorMsg = rawError;
+      } else if (rawError && typeof rawError === "object") {
+        errorMsg = rawError.message || rawError.error || (err.response?.status === 404 ? "API route /api/auth/login not found (404). Ensure backend server is running & proxied." : JSON.stringify(rawError));
+      }
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
