@@ -327,11 +327,11 @@ export default function Offers() {
   );
 
   const getTrackingUrl = (offerId: string) => `${window.location.origin}/track?offer_id=${offerId}&pub_id={pub_id}&sub_id1={sub_id1}`;
-  const getPostbackUrl = (offerId: string) => `${window.location.origin}/api/postback?click_id={click_id}&revenue=10&payout=5`;
+  const getPostbackUrl = (offerId: string) => `${window.location.origin}/api/postback?click_id={click_id}&token=npc_postback_sec_2026&revenue=10&payout=5`;
   const getScriptTag = (offerId: string) => `<script src="${window.location.origin}/api/script/${offerId}.js" async></script>`;
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-6 animate-fadeIn pb-12">
       {/* Header section */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
         <div>
@@ -858,6 +858,53 @@ export default function Offers() {
                     value={formData.ispTargeting}
                     onChange={(e) => setFormData({ ...formData, ispTargeting: e.target.value })}
                   />
+
+                  {/* Pixel Trigger & Manual Page Targeting Section */}
+                  <div className="border-t border-slate-200 pt-4 space-y-4">
+                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Client Pixel & Page Targeting Controls</h4>
+                    
+                    <Input
+                      label="Manual Page Targeting (URL Path Whitelist CSV)"
+                      placeholder="e.g. /checkout, /thank-you (Leave blank for ALL pages)"
+                      value={formData.targetPages}
+                      onChange={(e) => setFormData({ ...formData, targetPages: e.target.value })}
+                    />
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <Input
+                        label="Initial Trigger Delay (ms)"
+                        type="number"
+                        placeholder="0 (Instant)"
+                        value={formData.triggerDelayMs}
+                        onChange={(e) => setFormData({ ...formData, triggerDelayMs: Number(e.target.value) })}
+                      />
+                      <Input
+                        label="Repeat Interval (ms)"
+                        type="number"
+                        placeholder="0 (Disabled)"
+                        value={formData.triggerIntervalMs}
+                        onChange={(e) => setFormData({ ...formData, triggerIntervalMs: Number(e.target.value) })}
+                      />
+                      <Input
+                        label="Max Repeat Count"
+                        type="number"
+                        placeholder="0 (Unlimited)"
+                        value={formData.triggerRepeatCount}
+                        onChange={(e) => setFormData({ ...formData, triggerRepeatCount: Number(e.target.value) })}
+                      />
+                    </div>
+
+                    <Select
+                      label="Pixel Frequency Capping"
+                      value={formData.frequencyCap}
+                      onChange={(e) => setFormData({ ...formData, frequencyCap: e.target.value as any })}
+                      options={[
+                        { value: "unlimited", label: "Unlimited (Fire every page load)" },
+                        { value: "once_per_session", label: "Once per Session (sessionStorage)" },
+                        { value: "once_per_user", label: "Once per User (localStorage)" }
+                      ]}
+                    />
+                  </div>
                 </div>
               )}
             </form>

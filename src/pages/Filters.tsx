@@ -1,26 +1,61 @@
-/* Filters.tsx: Global security and anti-fraud settings including IP Blacklists. */
+/* Filters.tsx: Global security and anti-fraud settings including IP Blacklists & Master Global Tracking Switch. */
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
-import { Input, Select } from "../components/ui/Input";
+import { Input } from "../components/ui/Input";
 import { useToast } from "../components/ui/Toast";
-import { Shield, ShieldCheck, Globe, Wifi, Settings, AlertTriangle, Monitor, Cpu, Plus, Trash2 } from "lucide-react";
+import { Shield, ShieldCheck, Globe, AlertTriangle, Plus, Trash2, Power, AlertOctagon, RefreshCw } from "lucide-react";
 
 export default function Filters() {
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState("bots");
+  const [activeTab, setActiveTab] = useState("global");
+  const [globalTracking, setGlobalTracking] = useState<boolean>(true);
+  const [togglingGlobal, setTogglingGlobal] = useState(false);
   const [blacklist, setBlacklist] = useState<string[]>([]);
   const [newIp, setNewIp] = useState("");
   const [addingIp, setAddingIp] = useState(false);
   const [removingIp, setRemovingIp] = useState<string | null>(null);
 
   useEffect(() => {
+    fetchGlobalTracking();
+  }, []);
+
+  useEffect(() => {
     if (activeTab === "blacklist") {
       fetchBlacklist();
     }
   }, [activeTab]);
+
+  const fetchGlobalTracking = async () => {
+    try {
+      const res = await axios.get("/api/global-tracking");
+      setGlobalTracking(res.data.globalTracking !== false);
+    } catch (err) {
+      console.error("Failed to fetch global tracking status", err);
+    }
+  };
+
+  const toggleGlobalTracking = async (targetActive: boolean) => {
+    setTogglingGlobal(true);
+    try {
+      const res = await axios.post("/api/global-tracking", { active: targetActive });
+      const updatedState = res.data.globalTracking !== false;
+      setGlobalTracking(updatedState);
+      showToast(
+        updatedState ? "success" : "warning",
+        updatedState ? "Master Tracking Enabled" : "Master Tracking Suspended",
+        updatedState
+          ? "Traffic engine is now actively processing and redirecting clicks across all campaigns."
+          : "EMERGENCY SUSPENSION ACTIVE: All incoming clicks will now be filtered/blocked."
+      );
+    } catch (err: any) {
+      showToast("error", "Failed to update global tracking switch", err?.response?.data?.error || "Please try again.");
+    } finally {
+      setTogglingGlobal(false);
+    }
+  };
 
   const fetchBlacklist = async () => {
     try {
@@ -35,7 +70,6 @@ export default function Filters() {
     e.preventDefault();
     const trimmed = newIp.trim();
     if (!trimmed) return;
-    // Basic IP format validation
     const ipv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(trimmed);
     const ipv6 = trimmed.includes(":");
     if (!ipv4 && !ipv6) {
@@ -69,18 +103,75 @@ export default function Filters() {
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-6 animate-fadeIn pb-12">
       {/* Header section */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Global Filters</h2>
-          <p className="text-sm text-slate-500">Manage global anti-fraud rules and blacklists.</p>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Global Filters & Controls</h2>
+          <p className="text-sm text-slate-500">Manage master tracking switch, anti-fraud rules, and IP blacklists.</p>
         </div>
       </header>
+
+      {/* Master Global Tracking Emergency Switch Banner */}
+      <div className={`p-6 rounded-2xl border transition-all duration-300 ${
+        globalTracking 
+          ? "bg-slate-950 border-emerald-500/30 text-white shadow-md" 
+          : "bg-slate-950 border-rose-500/40 text-white shadow-md"
+      }`}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-start gap-4">
+            <div className={`p-3 rounded-xl shrink-0 ${globalTracking ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-rose-500/20 text-rose-400 border border-rose-500/30"}`}>
+              <Power size={24} className={globalTracking ? "animate-pulse" : ""} />
+            </div>
+            <div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <h3 className="text-lg font-bold tracking-tight">Master Global Tracking Switch</h3>
+                <Badge variant={globalTracking ? "success" : "danger"} className="font-mono text-xs tracking-wider uppercase">
+                  {globalTracking ? "SYSTEM LIVE" : "EMERGENCY SUSPENDED"}
+                </Badge>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                One-click emergency toggle to instantly suspend or resume all traffic tracking engine operations globally across every active campaign.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <Button
+              type="button"
+              disabled={togglingGlobal}
+              onClick={() => toggleGlobalTracking(!globalTracking)}
+              className={`px-5 py-2.5 h-auto font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-md ${
+                globalTracking
+                  ? "bg-rose-600 hover:bg-rose-700 text-white border border-rose-500"
+                  : "bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500"
+              }`}
+            >
+              <Power size={16} className="mr-2" />
+              {togglingGlobal 
+                ? "Updating..." 
+                : globalTracking 
+                  ? "Emergency Pause All Traffic" 
+                  : "Resume Global Tracking"}
+            </Button>
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {/* Navigation column */}
         <div className="md:col-span-1 space-y-1.5">
+          <button
+            onClick={() => setActiveTab("global")}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2.5 cursor-pointer ${
+              activeTab === "global"
+                ? "bg-indigo-50 text-indigo-700 border-l-4 border-indigo-600"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+            }`}
+          >
+            <Power size={14} />
+            Master Switch
+          </button>
           <button
             onClick={() => setActiveTab("bots")}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2.5 cursor-pointer ${
@@ -118,6 +209,50 @@ export default function Filters() {
 
         {/* Content column */}
         <div className="md:col-span-3 space-y-6">
+          {activeTab === "global" && (
+            <Card className="animate-fadeIn">
+              <CardHeader>
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-slate-800">
+                    <Power className={globalTracking ? "text-emerald-600" : "text-rose-600"} size={20} />
+                    Master Tracking State Control
+                  </CardTitle>
+                  <CardDescription>
+                    Control the master tracking engine status stored directly in the SQLite database configuration layer.
+                  </CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className={`p-4 rounded-xl border text-xs flex gap-3 ${
+                  globalTracking ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-rose-50 border-rose-200 text-rose-900"
+                }`}>
+                  <AlertOctagon size={18} className="shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Current Operational Mode: </span>
+                    {globalTracking 
+                      ? "Global tracking is ON. All incoming click traffic (/track and /api/pixel-track) will be evaluated through anti-fraud rules and redirected to active destination URLs."
+                      : "Global tracking is SUSPENDED. All incoming traffic across all campaigns will be automatically marked as filtered (Reason: Global Tracking Suspended)."}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">Global Engine Toggle</h4>
+                    <p className="text-xs text-slate-500">Toggle master status on or off with instant persistence.</p>
+                  </div>
+                  <Button
+                    onClick={() => toggleGlobalTracking(!globalTracking)}
+                    disabled={togglingGlobal}
+                    className={`gap-2 ${globalTracking ? "bg-rose-600 hover:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
+                  >
+                    <Power size={14} />
+                    {globalTracking ? "Suspend Tracking" : "Enable Tracking"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "bots" && (
             <Card className="animate-fadeIn">
               <CardHeader>

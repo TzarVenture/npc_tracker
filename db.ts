@@ -254,7 +254,16 @@ export function setGlobalTrackingState(active: boolean): void {
 // Offers Database Operations
 export function getAllOffers(): Offer[] {
   const rows = db.prepare("SELECT * FROM offers ORDER BY created_at DESC").all() as any[];
-  return rows.map(mapOfferRow);
+  // High-performance single SQL aggregation query to avoid N+1 query overhead
+  const passedCounts = db.prepare(`
+    SELECT offer_id, COUNT(*) as cnt
+    FROM clicks
+    WHERE status = 'passed'
+    GROUP BY offer_id
+  `).all() as any[];
+  const passedMap = new Map<string, number>(passedCounts.map(pc => [pc.offer_id, pc.cnt]));
+
+  return rows.map(r => mapOfferRow(r, passedMap.get(r.id) || 0));
 }
 
 export function getOfferById(id: string): Offer | undefined {
@@ -668,7 +677,9 @@ export function getHourlyPerformance() {
     { time: "20:00", clicks: 0, revenue: 0, filtered: 0 }
   ];
 
-  const clicks = db.prepare("SELECT timestamp, status, revenue FROM clicks").all() as any[];
+  // Fetch only last 24 hours of traffic to optimize memory & query execution speed
+  const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const clicks = db.prepare("SELECT timestamp, status, revenue FROM clicks WHERE timestamp >= ?").all(past24h) as any[];
 
   clicks.forEach(c => {
     const time = new Date(c.timestamp);
@@ -716,11 +727,14 @@ export function getPublishersStats() {
 }
 
 // Row Mapper Helpers
-function mapOfferRow(r: any): Offer {
+function mapOfferRow(r: any, cachedPassedClicks?: number): Offer {
   const totalConversions = r.total_conversions || 0;
   const clickCount = r.click_count || 0;
-  const passedClicksRow = db.prepare("SELECT COUNT(*) as cnt FROM clicks WHERE offer_id = ? AND status = 'passed'").get(r.id) as any;
-  const passedClicks = passedClicksRow ? passedClicksRow.cnt : 0;
+  let passedClicks = cachedPassedClicks;
+  if (passedClicks === undefined) {
+    const passedClicksRow = db.prepare("SELECT COUNT(*) as cnt FROM clicks WHERE offer_id = ? AND status = 'passed'").get(r.id) as any;
+    passedClicks = passedClicksRow ? passedClicksRow.cnt : 0;
+  }
   const conversionRate = passedClicks > 0 ? (totalConversions / passedClicks) * 100 : 0;
 
   return {
@@ -798,6 +812,13 @@ function mapConversionRow(r: any): Conversion {
     payout: r.payout,
     timestamp: r.timestamp
   };
+}
+
+// Automated retention cleanup function to prune click logs older than X days
+export function pruneOldClicks(retentionDays = 30): number {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const res = db.prepare("DELETE FROM clicks WHERE timestamp < ?").run(cutoff);
+  return res.changes;
 }
 
 // Initialize SQLite tables and indexes immediately upon import

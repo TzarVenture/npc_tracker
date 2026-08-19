@@ -341,7 +341,16 @@ app.delete("/api/offers/:id", authMiddleware, (req, res) => {
 // ==========================================
 
 app.get("/api/postback", (req, res) => {
-  const { click_id, payout, revenue, event } = req.query;
+  const { click_id, payout, revenue, event, token, secret } = req.query;
+
+  // Postback Security Verification (Security Token Check)
+  const configuredSecret = process.env.POSTBACK_SECRET;
+  if (configuredSecret && configuredSecret.trim()) {
+    const providedToken = String(token || secret || "").trim();
+    if (providedToken !== configuredSecret.trim()) {
+      return res.status(401).json({ error: "Unauthorized: Invalid or missing postback security token" });
+    }
+  }
 
   if (!click_id) {
     return res.status(400).json({ error: "Missing click_id parameter" });
