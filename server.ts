@@ -344,12 +344,10 @@ app.get("/api/postback", (req, res) => {
   const { click_id, payout, revenue, event, token, secret } = req.query;
 
   // Postback Security Verification (Security Token Check)
-  const configuredSecret = process.env.POSTBACK_SECRET;
-  if (configuredSecret && configuredSecret.trim()) {
-    const providedToken = String(token || secret || "").trim();
-    if (providedToken !== configuredSecret.trim()) {
-      return res.status(401).json({ error: "Unauthorized: Invalid or missing postback security token" });
-    }
+  const configuredSecret = process.env.POSTBACK_SECRET || "npc_postback_sec_2026";
+  const providedToken = String(token || secret || "").trim();
+  if (providedToken !== configuredSecret.trim()) {
+    return res.status(401).json({ error: "Unauthorized: Invalid or missing postback security token" });
   }
 
   if (!click_id) {
@@ -1078,7 +1076,8 @@ app.get("/track", (req, res) => {
 // URL: /cdn/v2/wgt.js?id=OFFER_ID
 // ==========================================
 app.get("/cdn/v2/wgt.js", (req, res) => {
-  const offerId = String(req.query.id || "");
+  try {
+    const offerId = String(req.query.id || "");
   const offer = offerId ? getOfferById(offerId) : undefined;
 
   if (!offer) {
@@ -1210,6 +1209,10 @@ app.get("/cdn/v2/wgt.js", (req, res) => {
     .set("Cache-Control", "no-store, no-cache")
     .set("X-Content-Type-Options", "nosniff")
     .send(scriptContent);
+  } catch (err) {
+    console.error("Error generating script:", err);
+    res.type("application/javascript").send("// Error generating tracker script");
+  }
 });
 
 // Legacy alias kept for backward compatibility — redirects to new stealth endpoint
@@ -1230,7 +1233,12 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: "spa"
     });
-    app.use(vite.middlewares);
+    app.use((req, res, next) => {
+      if (req.path.startsWith("/cdn/") || req.path.startsWith("/api/") || req.path === "/px" || req.path === "/track") {
+        return next();
+      }
+      vite.middlewares(req, res, next);
+    });
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
