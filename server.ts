@@ -620,6 +620,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   const redirectType = offer.redirectType || "302";
 
   if (redirectType === "307") {
+    res.setHeader("Referrer-Policy", "no-referrer");
     return res.redirect(307, targetUrl);
   }
 
@@ -641,21 +642,23 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   }
 
   if (redirectType === "double_meta") {
-    const cleanUrl = `/clean-redirect?dest=${encodeURIComponent(targetUrl)}`;
-    return res.type("html").send(`
-<!DOCTYPE html>
+    // Single-page JS redirect with no-referrer policy — eliminates the two-hop white flash
+    return res.type("html").send(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="refresh" content="0;url=${encodeURI(cleanUrl)}">
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(cleanUrl)});</script>
+  <script>
+    (function(){
+      try { document.referrer; } catch(e) {}
+      window.location.replace(${JSON.stringify(targetUrl)});
+    })();
+  </script>
 </body>
-</html>
-    `);
+</html>`);
   }
 
   if (redirectType === "custom_referrer") {
@@ -679,6 +682,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   }
 
   // Default: HTTP 302
+  res.setHeader("Referrer-Policy", "no-referrer");
   return res.redirect(302, targetUrl);
 };
 
@@ -831,20 +835,17 @@ app.post("/api/simulate", (req, res) => {
 
 // ==========================================
 // CLIENT-SIDE PIXEL TRACKING ENDPOINT
+// Primary: POST /px  (stealth CDN-like URL)
+// Alias:   POST /api/pixel-track (backward compat)
 // ==========================================
-app.post("/api/pixel-track", (req, res) => {
-  // Support both camelCase offerId and snake_case offer_id
+const handlePixelTrack = (req: express.Request, res: express.Response) => {
   const targetOfferId = req.body.offer_id || req.body.offerId;
   const { pub_id, pubId, sub_id1, subId1, sub_id2, subId2, isp } = req.body;
 
-  if (!targetOfferId) {
-    return res.status(400).json({ error: "Missing offer_id parameter" });
-  }
-
+  // Silent 204 — no error body visible in DevTools console
+  if (!targetOfferId) return res.status(204).end();
   const offer = getOfferById(targetOfferId);
-  if (!offer) {
-    return res.status(404).json({ error: "Campaign Not Found" });
-  }
+  if (!offer) return res.status(204).end();
 
   const clientIp = req.ip || req.headers["x-forwarded-for"] || "127.0.0.1";
   const userAgentStr = req.headers["user-agent"] || "";
@@ -859,59 +860,39 @@ app.post("/api/pixel-track", (req, res) => {
   const blacklist = getBlacklist();
 
   if (!getGlobalTrackingState()) {
-    status = "filtered";
-    filterReason = "Global Tracking Suspended";
+    status = "filtered"; filterReason = "Global Tracking Suspended";
   } else if (offer.status !== "active") {
-    status = "filtered";
-    filterReason = "Campaign Paused";
+    status = "filtered"; filterReason = "Campaign Paused";
   } else if (offer.startDate && nowIso < offer.startDate) {
-    status = "filtered";
-    filterReason = "Campaign Schedule Pending";
+    status = "filtered"; filterReason = "Campaign Schedule Pending";
   } else if (offer.endDate && nowIso > offer.endDate) {
-    status = "filtered";
-    filterReason = "Campaign Schedule Expired";
+    status = "filtered"; filterReason = "Campaign Schedule Expired";
   } else if (blacklist.includes(ipString)) {
-    status = "blocked";
-    filterReason = "IP Blacklisted";
+    status = "blocked"; filterReason = "IP Blacklisted";
   } else if (offer.blockBots && isBot(userAgentStr)) {
-    status = "blocked";
-    filterReason = "Bot Signature Detected";
+    status = "blocked"; filterReason = "Bot Signature Detected";
   } else if (offer.duplicateWindowMinutes && offer.duplicateWindowMinutes > 0 && hasRecentClickFromIp(offer._id, ipString, offer.duplicateWindowMinutes)) {
-    status = "filtered";
-    filterReason = "Duplicate Click Window Active";
+    status = "filtered"; filterReason = "Duplicate Click Window Active";
   } else if (offer.geoTargeting && offer.geoTargeting.length > 0 && !offer.geoTargeting.includes(geo.country)) {
-    status = "filtered";
-    filterReason = "Geo Restricted";
+    status = "filtered"; filterReason = "Geo Restricted";
   } else if (offer.cityTargeting && offer.cityTargeting.length > 0 && !offer.cityTargeting.includes(geo.city.toUpperCase())) {
-    status = "filtered";
-    filterReason = "City Restricted";
+    status = "filtered"; filterReason = "City Restricted";
   } else if (offer.browserTargeting && offer.browserTargeting.length > 0 && !offer.browserTargeting.includes(browser.toUpperCase())) {
-    status = "filtered";
-    filterReason = "Browser Restricted";
+    status = "filtered"; filterReason = "Browser Restricted";
   } else if (offer.ispTargeting && offer.ispTargeting.length > 0 && !offer.ispTargeting.includes(clientIsp.toUpperCase())) {
-    status = "filtered";
-    filterReason = "ISP Restricted";
+    status = "filtered"; filterReason = "ISP Restricted";
   } else if (offer.deviceType && offer.deviceType !== "All" && offer.deviceType !== device) {
-    status = "filtered";
-    filterReason = "Device Restricted";
+    status = "filtered"; filterReason = "Device Restricted";
   } else if (offer.osType && offer.osType !== "All" && offer.osType !== os) {
-    status = "filtered";
-    filterReason = "OS Restricted";
+    status = "filtered"; filterReason = "OS Restricted";
   } else if (offer.hourlyCap && offer.hourlyCap > 0 && getClicksHourlyCount(offer._id) >= offer.hourlyCap) {
-    status = "capped";
-    filterReason = "Hourly Click Cap Reached";
+    status = "capped"; filterReason = "Hourly Click Cap Reached";
   } else if (offer.dailyCap && offer.dailyCap > 0 && getClicksTodayCount(offer._id) >= offer.dailyCap) {
-    status = "capped";
-    filterReason = "Daily Click Cap Reached";
+    status = "capped"; filterReason = "Daily Click Cap Reached";
   }
 
-  if (status !== "passed" && offer.actionOnFilter === "drop") {
-    return res.json({ success: true, dropped: true, filterReason });
-  }
-
-  if (status === "passed") {
-    incrementOfferClickCount(offer._id);
-  }
+  if (status !== "passed" && offer.actionOnFilter === "drop") return res.status(204).end();
+  if (status === "passed") incrementOfferClickCount(offer._id);
 
   const clickLog: Click = {
     _id: "click-" + Math.random().toString(36).substring(2, 9),
@@ -922,20 +903,23 @@ app.post("/api/pixel-track", (req, res) => {
     ip: ipString,
     country: geo.country,
     city: geo.city,
-    device,
-    os,
-    browser,
+    device, os, browser,
     isp: clientIsp,
     userAgent: userAgentStr,
-    status,
-    filterReason,
+    status, filterReason,
     revenue: status === "passed" ? offer.revenue : 0,
     timestamp: new Date().toISOString()
   };
 
   recordClick(clickLog);
-  res.json({ success: true, status, filterReason });
-});
+  // 204 No Content — zero visible response body in Network tab
+  res.status(204).end();
+};
+
+// Primary stealth URL (looks like CDN analytics ping in DevTools)
+app.post("/px", handlePixelTrack);
+// Backward-compat alias — legacy integrations keep working
+app.post("/api/pixel-track", handlePixelTrack);
 
 // ==========================================
 // REAL-TIME TRACKING REDIRECT ENDPOINT
@@ -1090,93 +1074,149 @@ app.get("/track", (req, res) => {
 });
 
 // ==========================================
-// DYNAMIC JS SNIPPET GENERATOR
+// CLIENT-SIDE PIXEL SCRIPT GENERATOR
+// URL: /cdn/v2/wgt.js?id=OFFER_ID
 // ==========================================
-app.get("/api/script/:offerId.js", (req, res) => {
-  const { offerId } = req.params;
-  const offer = getOfferById(offerId);
+app.get("/cdn/v2/wgt.js", (req, res) => {
+  const offerId = String(req.query.id || "");
+  const offer = offerId ? getOfferById(offerId) : undefined;
 
   if (!offer) {
-    return res.type("application/javascript").send("// Tracker: Campaign not found");
+    // Silent empty script — no errors exposed to visitor console
+    return res.type("application/javascript")
+      .set("Cache-Control", "no-store")
+      .send("(function(){})();");
   }
 
-  const targetPagesStr = offer.targetPages && offer.targetPages.length > 0 ? JSON.stringify(offer.targetPages) : "[]";
+  const targetPagesStr = offer.targetPages && offer.targetPages.length > 0
+    ? JSON.stringify(offer.targetPages) : "[]";
+  const targetPageRulesStr = offer.targetPageRules && offer.targetPageRules.length > 0
+    ? JSON.stringify(offer.targetPageRules) : "[]";
   const delayMs = offer.triggerDelayMs || 0;
   const intervalMs = offer.triggerIntervalMs || 0;
   const repeatCount = offer.triggerRepeatCount || 0;
   const freqCap = offer.frequencyCap || "unlimited";
+  const pixelEndpoint = `${req.protocol}://${req.get('host')}/px`;
 
-  const scriptContent = `
-(function() {
-  const config = {
-    offerId: "${offerId}",
-    targetPages: ${targetPagesStr},
-    delayMs: ${delayMs},
-    intervalMs: ${intervalMs},
-    repeatCount: ${repeatCount},
-    freqCap: "${freqCap}",
-    trackerUrl: "${req.protocol}://${req.get('host')}/api/pixel-track"
-  };
+  const scriptContent = `(function(){
+  try{
+    var _c={
+      oid:${JSON.stringify(offerId)},
+      tp:${targetPagesStr},
+      tpr:${targetPageRulesStr},
+      dMs:${delayMs},
+      iMs:${intervalMs},
+      rc:${repeatCount},
+      fc:${JSON.stringify(freqCap)},
+      ep:${JSON.stringify(pixelEndpoint)}
+    };
 
-  if (config.targetPages.length > 0) {
-    const currentPath = window.location.pathname;
-    const matches = config.targetPages.some(function(page) { return currentPath.includes(page); });
-    if (!matches) return;
-  }
-
-  const sessionKey = "tracker_session_" + config.offerId;
-  const userKey = "tracker_user_" + config.offerId;
-
-  if (config.freqCap === "once_per_session" && sessionStorage.getItem(sessionKey)) return;
-  if (config.freqCap === "once_per_user" && localStorage.getItem(userKey)) return;
-
-  let fireCount = 0;
-  
-  const firePixel = function() {
-    if (config.freqCap === "once_per_session") sessionStorage.setItem(sessionKey, "1");
-    if (config.freqCap === "once_per_user") localStorage.setItem(userKey, "1");
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const pubId = urlParams.get("pub_id") || "";
-    const subId1 = urlParams.get("sub_id1") || "";
-    
-    fetch(config.trackerUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        offer_id: config.offerId,
-        pub_id: pubId,
-        sub_id1: subId1,
-        page_url: window.location.href
-      })
-    }).catch(function() {});
-    
-    fireCount++;
-  };
-
-  const startFires = function() {
-    firePixel();
-    if (config.intervalMs > 0 && (config.repeatCount === 0 || config.repeatCount > 1)) {
-      const timerId = setInterval(function() {
-        if (config.repeatCount > 0 && fireCount >= config.repeatCount) {
-          clearInterval(timerId);
-          return;
+    // Page targeting — check if current URL path matches whitelist or weighted rules
+    var _matchPage=function(){
+      var p=window.location.pathname;
+      // Weighted TargetPageRules (advanced mode)
+      if(_c.tpr&&_c.tpr.length>0){
+        var active=_c.tpr.filter(function(r){return r.status==='active';});
+        if(active.length===0)return null;
+        var matched=active.filter(function(r){
+          if(r.matchType==='exact')return p===r.path;
+          if(r.matchType==='startsWith')return p.indexOf(r.path)===0;
+          return p.indexOf(r.path)>-1;
+        });
+        if(matched.length===0)return null;
+        var total=matched.reduce(function(s,r){return s+(r.weight||0);},0);
+        if(total<=0)return matched[0];
+        var rand=Math.random()*total;
+        for(var i=0;i<matched.length;i++){
+          rand-=(matched[i].weight||0);
+          if(rand<0)return matched[i];
         }
-        firePixel();
-      }, config.intervalMs);
+        return matched[0];
+      }
+      // Simple flat targetPages whitelist
+      if(_c.tp&&_c.tp.length>0){
+        var ok=_c.tp.some(function(pg){return p.indexOf(pg)>-1;});
+        return ok?{}:null;
+      }
+      return {};
+    };
+
+    var _rule=_matchPage();
+    if(_rule===null)return;
+
+    var _sk="_ts_"+_c.oid;
+    var _uk="_tu_"+_c.oid;
+    // Frequency cap — protected from Safari Private Mode SecurityError
+    try{
+      if(_c.fc==="once_per_session"&&sessionStorage.getItem(_sk))return;
+      if(_c.fc==="once_per_user"&&localStorage.getItem(_uk))return;
+    }catch(e){}
+
+    var _n=0;
+
+    var _fire=function(){
+      try{
+        try{
+          if(_c.fc==="once_per_session")sessionStorage.setItem(_sk,"1");
+          if(_c.fc==="once_per_user")localStorage.setItem(_uk,"1");
+        }catch(e){}
+        var _q=new URLSearchParams(window.location.search);
+        var _pd=JSON.stringify({
+          offer_id:_c.oid,
+          pub_id:_q.get("pub_id")||"",
+          sub_id1:_q.get("sub_id1")||"",
+          page_url:window.location.href
+        });
+        // sendBeacon is fire-and-forget — zero page blocking, works even on page close
+        var _sent=false;
+        if(typeof navigator.sendBeacon==="function"){
+          try{
+            _sent=navigator.sendBeacon(_c.ep,new Blob([_pd],{type:"application/json"}));
+          }catch(e){}
+        }
+        if(!_sent){
+          try{
+            fetch(_c.ep,{method:"POST",headers:{"Content-Type":"application/json"},body:_pd,keepalive:true})
+              .catch(function(){});
+          }catch(e){}
+        }
+        _n++;
+      }catch(e){}
+    };
+
+    var _start=function(){
+      _fire();
+      if(_c.iMs>0&&(_c.rc===0||_c.rc>1)){
+        var _t=setInterval(function(){
+          try{
+            if(_c.rc>0&&_n>=_c.rc){clearInterval(_t);return;}
+            _fire();
+          }catch(e){clearInterval(_t);}
+        },_c.iMs);
+      }
+    };
+
+    // Per-rule delay override takes priority over global delayMs
+    var _delay=(_rule&&_rule.delayMs!=null)?_rule.delayMs:_c.dMs;
+    if(_delay>0){
+      setTimeout(_start,_delay);
+    }else{
+      _start();
     }
-  };
+  }catch(e){}
+})();`;
 
-  if (config.delayMs > 0) {
-    setTimeout(startFires, config.delayMs);
-  } else {
-    startFires();
-  }
-})();
-  `;
-
-  res.type("application/javascript").send(scriptContent);
+  res.type("application/javascript")
+    .set("Cache-Control", "no-store, no-cache")
+    .set("X-Content-Type-Options", "nosniff")
+    .send(scriptContent);
 });
+
+// Legacy alias kept for backward compatibility — redirects to new stealth endpoint
+app.get("/api/script/:offerId.js", (req, res) => {
+  res.redirect(302, `/cdn/v2/wgt.js?id=${encodeURIComponent(req.params.offerId)}`);
+});
+
 
 // ==========================================
 // VITE MIDDLEWARE INTERACTION (DEV/PROD)

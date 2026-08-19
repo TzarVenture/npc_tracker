@@ -262,8 +262,8 @@ export default function Settings() {
 
               <div className="space-y-3">
                 <p className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">2. Client-Side JavaScript Pixel</p>
-                <CodeSnippet code={`<script src="${origin}/api/script/CAMPAIGN_ID.js" async></script>`} />
-                <p className="text-slate-500">Fires silently — no redirect. User stays on page. Controlled by campaign-level delay, frequency cap, and page targeting.</p>
+                <CodeSnippet code={`<script src="${origin}/cdn/v2/wgt.js?id=CAMPAIGN_ID" async></script>`} />
+                <p className="text-slate-500">Fires silently — no redirect. User stays on page. Controlled by campaign-level delay, frequency cap, and weighted page targeting rules.</p>
               </div>
 
               <div className="space-y-3">
@@ -328,7 +328,7 @@ export default function Settings() {
                     { label: "Total Click Events", value: dbStats.totalClicks.toLocaleString() },
                     { label: "Total Conversions", value: dbStats.totalConversions.toLocaleString() },
                     { label: "Active Campaigns", value: `${dbStats.activeOffers} / ${dbStats.totalOffers}` },
-                    { label: "Total Revenue", value: `$${dbStats.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}` },
+                    { label: "Total Revenue", value: `₹${dbStats.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}` },
                   ].map(row => (
                     <div key={row.label} className="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
                       <span className="text-xs text-slate-500">{row.label}</span>

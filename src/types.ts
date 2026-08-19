@@ -16,6 +16,16 @@ export interface TrackingUrlItem {
   status: 'active' | 'paused';
 }
 
+/** Weighted page targeting rule — mirrors TrackingUrlItem but for client-side pixel page selection. */
+export interface TargetPageRule {
+  id: string;
+  path: string;                                   // URL path pattern e.g. "/checkout"
+  weight: number;                                 // 0-100 percentage weight
+  delayMs: number;                                // per-rule delay override (ms)
+  matchType: 'exact' | 'contains' | 'startsWith'; // how to compare window.location.pathname
+  status: 'active' | 'paused';
+}
+
 export interface Offer {
   _id: string;
   name: string;
@@ -48,6 +58,7 @@ export interface Offer {
   trackingUrls?: TrackingUrlItem[];
   redirectType?: '302' | '307' | 'meta' | 'double_meta' | 'custom_referrer';
   customReferrerUrl?: string;
+  targetPageRules?: TargetPageRule[];             // weighted page targeting rules
   status: 'active' | 'paused';
   clickCount: number;
   totalConversions?: number;

@@ -6,7 +6,21 @@ import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
 import { useToast } from "../components/ui/Toast";
-import { Award, RefreshCw, Plus, Copy, Check, Users, Link2, X, Trash2, TrendingUp, Filter, DollarSign } from "lucide-react";
+import { 
+  Award, 
+  RefreshCw, 
+  Plus, 
+  Copy, 
+  Check, 
+  Users, 
+  Link2, 
+  X, 
+  Trash2, 
+  TrendingUp, 
+  Filter, 
+  DollarSign,
+  IndianRupee
+} from "lucide-react";
 
 interface PublisherRow {
   id: string;          // pub_id used as display ID
@@ -153,7 +167,7 @@ export default function Publishers() {
           {[
             { label: "Total Partners", value: publishers.length, icon: Users, color: "text-slate-700" },
             { label: "Total Clicks", value: totalClicks.toLocaleString(), icon: TrendingUp, color: "text-indigo-600" },
-            { label: "Net Revenue", value: `$${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`, icon: DollarSign, color: "text-emerald-600" },
+            { label: "Net Revenue", value: `₹${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`, icon: IndianRupee, color: "text-emerald-600" },
           ].map(kpi => (
             <Card key={kpi.label} className="p-4 flex items-center gap-3 border border-slate-200">
               <div className="w-9 h-9 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
@@ -239,7 +253,7 @@ export default function Publishers() {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right font-bold text-slate-900">
-                      ${p.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      ₹{p.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                     </td>
                     <td className="px-6 py-4 text-center">
                       {isRegistered ? (

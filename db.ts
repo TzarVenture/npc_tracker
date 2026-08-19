@@ -122,6 +122,7 @@ export function initDB() {
   try { db.exec("ALTER TABLE offers ADD COLUMN redirect_type TEXT DEFAULT '302';"); } catch (e) {}
   try { db.exec("ALTER TABLE offers ADD COLUMN custom_referrer_url TEXT DEFAULT '';"); } catch (e) {}
   try { db.exec("ALTER TABLE clicks ADD COLUMN session_id TEXT DEFAULT '';"); } catch (e) {}
+  try { db.exec("ALTER TABLE offers ADD COLUMN target_page_rules TEXT DEFAULT '[]';"); } catch (e) {}
 
   // Initialize default Admin User if none exists
   const existingAdmin = db.prepare("SELECT * FROM admin_users WHERE username = ?").get("admin");
@@ -279,14 +280,14 @@ export function saveOffer(offer: Offer): Offer {
       daily_cap, hourly_cap, start_date, end_date, duplicate_window_minutes, events,
       action_on_filter, block_bots, trigger_delay_ms, trigger_interval_ms, trigger_repeat_count,
       frequency_cap, target_pages, session_check_enabled, session_ttl_minutes, tracking_urls,
-      redirect_type, custom_referrer_url, status, click_count, total_conversions, created_at
+      redirect_type, custom_referrer_url, target_page_rules, status, click_count, total_conversions, created_at
     ) VALUES (
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?
     ) ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       destination_url = excluded.destination_url,
@@ -317,6 +318,7 @@ export function saveOffer(offer: Offer): Offer {
       tracking_urls = excluded.tracking_urls,
       redirect_type = excluded.redirect_type,
       custom_referrer_url = excluded.custom_referrer_url,
+      target_page_rules = excluded.target_page_rules,
       status = excluded.status,
       click_count = excluded.click_count,
       total_conversions = excluded.total_conversions
@@ -351,6 +353,7 @@ export function saveOffer(offer: Offer): Offer {
     JSON.stringify(offer.trackingUrls || []),
     offer.redirectType || "302",
     offer.customReferrerUrl || "",
+    JSON.stringify(offer.targetPageRules || []),
     offer.status || "active",
     offer.clickCount || 0,
     offer.totalConversions || 0,
@@ -768,6 +771,7 @@ function mapOfferRow(r: any, cachedPassedClicks?: number): Offer {
     trackingUrls: JSON.parse(r.tracking_urls || "[]"),
     redirectType: r.redirect_type || "302",
     customReferrerUrl: r.custom_referrer_url || "",
+    targetPageRules: JSON.parse(r.target_page_rules || "[]"),
     status: r.status,
     clickCount,
     totalConversions,

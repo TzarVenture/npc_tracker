@@ -22,7 +22,7 @@ import { useToast } from "../components/ui/Toast";
 import {
   MousePointerClick,
   ShieldAlert,
-  DollarSign,
+  IndianRupee,
   Activity,
   Play,
   RotateCcw,
@@ -305,15 +305,15 @@ export default function Dashboard() {
           <div>
             <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center justify-between">
               Campaign Net Revenue
-              <DollarSign size={14} className="text-amber-500" />
+              <IndianRupee size={14} className="text-amber-500" />
             </div>
             <div className="text-3xl font-bold text-slate-900">
-              ${stats.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₹{stats.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
           </div>
           <div className="text-amber-600 text-xs mt-3 flex items-center font-medium">
             <span className="bg-amber-50 px-2 py-0.5 rounded text-[10px] font-semibold mr-1.5">
-              ${stats.totalConversions && stats.totalConversions > 0 ? (stats.totalRevenue / stats.totalConversions).toFixed(2) : "0.00"}
+              ₹{stats.totalConversions && stats.totalConversions > 0 ? (stats.totalRevenue / stats.totalConversions).toFixed(2) : "0.00"}
             </span>
             Average payout per conversion
           </div>

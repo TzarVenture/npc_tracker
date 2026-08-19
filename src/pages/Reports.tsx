@@ -247,7 +247,7 @@ export default function Reports() {
                   <th className="px-6 py-4">Client IP</th>
                   <th className="px-6 py-4">Geo & Agent</th>
                   <th className="px-6 py-4 text-center">Outcome</th>
-                  <th className="px-6 py-4 text-right">Revenue ($)</th>
+                  <th className="px-6 py-4 text-right">Revenue (₹)</th>
                 </tr>
               </thead>
               <tbody className="text-sm divide-y divide-slate-100">
@@ -317,7 +317,7 @@ export default function Reports() {
                           )}
                         </td>
                         <td className="px-6 py-4 text-right font-bold text-slate-900">
-                          ${c.status === "passed" ? c.revenue.toFixed(2) : "0.00"}
+                          ₹{c.status === "passed" ? c.revenue.toFixed(2) : "0.00"}
                         </td>
                       </tr>
                     );
@@ -334,8 +334,8 @@ export default function Reports() {
                   <th className="px-6 py-4">Campaign Context</th>
                   <th className="px-6 py-4">Event Tier</th>
                   <th className="px-6 py-4">Timestamp</th>
-                  <th className="px-6 py-4 text-right">Revenue ($)</th>
-                  <th className="px-6 py-4 text-right">Payout ($)</th>
+                  <th className="px-6 py-4 text-right">Revenue (₹)</th>
+                  <th className="px-6 py-4 text-right">Payout (₹)</th>
                 </tr>
               </thead>
               <tbody className="text-sm divide-y divide-slate-100">
@@ -363,8 +363,8 @@ export default function Reports() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-slate-600 text-xs">{new Date(conv.timestamp).toLocaleString()}</td>
-                      <td className="px-6 py-4 text-right font-bold text-emerald-600">${conv.revenue.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-right font-bold text-slate-900">${conv.payout.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right font-bold text-emerald-600">₹{conv.revenue.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-right font-bold text-slate-900">₹{conv.payout.toFixed(2)}</td>
                     </tr>
                   ))
                 )}

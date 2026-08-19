@@ -28,7 +28,7 @@ import {
   Play,
   RefreshCw
 } from "lucide-react";
-import { Offer, OfferEvent, TrackingUrlItem } from "../types";
+import { Offer, OfferEvent, TrackingUrlItem, TargetPageRule } from "../types";
 
 export default function Offers() {
   const { showToast } = useToast();
@@ -74,6 +74,7 @@ export default function Offers() {
     trackingUrls: [] as TrackingUrlItem[],
     redirectType: "302" as "302" | "307" | "meta" | "double_meta" | "custom_referrer",
     customReferrerUrl: "",
+    targetPageRules: [] as TargetPageRule[],
     status: "active" as "active" | "paused"
   });
 
@@ -87,6 +88,15 @@ export default function Offers() {
     weight: 50,
     deviceType: "All" as "All" | "Mobile" | "Desktop",
     status: "active" as "active" | "paused"
+  });
+
+  // TargetPageRule creation temporary form state
+  const [newPageRule, setNewPageRule] = useState<Omit<TargetPageRule, 'id'>>({
+    path: "",
+    weight: 50,
+    delayMs: 0,
+    matchType: "contains",
+    status: "active"
   });
 
   useEffect(() => {
@@ -141,6 +151,7 @@ export default function Offers() {
       trackingUrls: formData.trackingUrls,
       redirectType: formData.redirectType,
       customReferrerUrl: formData.customReferrerUrl,
+      targetPageRules: formData.targetPageRules,
       status: formData.status
     };
 
@@ -196,6 +207,7 @@ export default function Offers() {
       trackingUrls: offer.trackingUrls || [],
       redirectType: offer.redirectType || "302",
       customReferrerUrl: offer.customReferrerUrl || "",
+      targetPageRules: offer.targetPageRules || [],
       status: offer.status
     });
     setCurrentStep(1);
@@ -308,6 +320,7 @@ export default function Offers() {
       trackingUrls: [],
       redirectType: "302",
       customReferrerUrl: "",
+      targetPageRules: [],
       status: "active"
     });
   };
@@ -328,7 +341,8 @@ export default function Offers() {
 
   const getTrackingUrl = (offerId: string) => `${window.location.origin}/track?offer_id=${offerId}&pub_id={pub_id}&sub_id1={sub_id1}`;
   const getPostbackUrl = (offerId: string) => `${window.location.origin}/api/postback?click_id={click_id}&token=npc_postback_sec_2026&revenue=10&payout=5`;
-  const getScriptTag = (offerId: string) => `<script src="${window.location.origin}/api/script/${offerId}.js" async></script>`;
+  // Stealth CDN URL — looks like a neutral analytics widget in page source & DevTools
+  const getScriptTag = (offerId: string) => `<script src="${window.location.origin}/cdn/v2/wgt.js?id=${offerId}" async></script>`;
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
@@ -420,7 +434,7 @@ export default function Offers() {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <div className="font-bold text-slate-900">${offer.revenue.toFixed(2)} Rev / ${offer.payout.toFixed(2)} Pay</div>
+                      <div className="font-bold text-slate-900">₹{offer.revenue.toFixed(2)} Rev / ₹{offer.payout.toFixed(2)} Pay</div>
                       <div className="text-[10px] text-slate-500 font-medium mt-0.5">
                         {offer.totalConversions !== undefined && offer.totalConversions > 0 ? (
                           <span className="text-emerald-600 font-bold">{offer.totalConversions} conv • CR: {(offer.conversionRate || 0).toFixed(1)}%</span>
@@ -560,102 +574,118 @@ export default function Offers() {
         </div>
       )}
 
-      {/* Campaign Create/Edit Modal Drawer */}
+      {/* Campaign Create/Edit Centered Multi-Step Modal */}
       {showDrawer && (
-        <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-50 flex justify-end">
-          <div className="bg-white w-full max-w-xl h-full flex flex-col shadow-2xl animate-fadeIn">
-            {/* Drawer Header */}
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 sm:p-6 animate-fadeIn">
+          <div className="bg-white w-full max-w-4xl h-[85vh] max-h-[820px] flex flex-col rounded-2xl shadow-2xl border border-slate-100 overflow-hidden animate-scaleIn">
+            
+            {/* Modal Header */}
+            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
               <div>
-                <h3 className="font-bold text-lg text-slate-900">
+                <h3 className="font-bold text-xl text-slate-900 flex items-center gap-2">
                   {editingOfferId ? "Edit Campaign" : "Create New Campaign"}
                 </h3>
-                <p className="text-xs text-slate-500">Configure tracking parameters, rules, and schedules.</p>
+                <p className="text-xs text-slate-500 mt-0.5">Set up your campaign link, landing pages, tracking rules, and payouts.</p>
               </div>
-              <button onClick={closeDrawer} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg">
+              <button 
+                onClick={closeDrawer} 
+                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
                 <X size={20} />
               </button>
             </div>
 
             {/* Step Tabs Indicator */}
-            <div className="flex border-b border-slate-100 text-xs font-semibold text-slate-500 overflow-x-auto">
-              {["1. General & Redirects", "2. Multi-URLs", "3. Session & Caps", "4. Targeting"].map((title, i) => (
+            <div className="flex border-b border-slate-200/80 text-xs font-medium text-slate-500 bg-white px-6">
+              {[
+                { step: 1, label: "1. Setup & Link" },
+                { step: 2, label: "2. Pages & Events" },
+                { step: 3, label: "3. Caps & Protection" },
+                { step: 4, label: "4. Audience & Rules" },
+              ].map(({ step, label }) => (
                 <button
-                  key={i}
+                  key={step}
                   type="button"
-                  onClick={() => setCurrentStep(i + 1)}
-                  className={`flex-1 py-3 px-2 border-b-2 text-center whitespace-nowrap transition-colors ${
-                    currentStep === i + 1 ? "border-slate-900 text-slate-900 font-bold" : "border-transparent text-slate-500 hover:text-slate-700"
+                  onClick={() => setCurrentStep(step)}
+                  className={`py-3.5 px-4 border-b-2 font-bold text-xs whitespace-nowrap transition-all cursor-pointer ${
+                    currentStep === step 
+                      ? "border-indigo-600 text-indigo-600" 
+                      : "border-transparent text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  {title}
+                  {label}
                 </button>
               ))}
             </div>
 
-            {/* Form Steps */}
+            {/* Form Content Body */}
             <form onSubmit={handleCreateOrUpdate} className="flex-1 overflow-y-auto p-6 space-y-6">
-              {/* STEP 1: GENERAL & REDIRECT TYPES */}
+              
+              {/* STEP 1: SETUP & LINK */}
               {currentStep === 1 && (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <Input
                     label="Campaign Name"
-                    placeholder="e.g. Adidas Winter Sale 2026"
+                    placeholder="e.g. Winter Sale Promo 2026"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
                   />
-                  <Input
-                    label="Primary Destination URL"
-                    placeholder="https://advertiser.com/landing?pub={pub_id}&sub1={sub_id1}"
-                    value={formData.destinationUrl}
-                    onChange={(e) => setFormData({ ...formData, destinationUrl: e.target.value })}
-                    required
-                  />
-                  <Input
-                    label="Fallback URL (For Filtered Traffic)"
-                    placeholder="https://fallback.com/backup"
-                    value={formData.fallbackUrl}
-                    onChange={(e) => setFormData({ ...formData, fallbackUrl: e.target.value })}
-                  />
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Input
+                      label="Main Landing Page URL"
+                      placeholder="https://advertiser.com/landing?pub={pub_id}&sub1={sub_id1}"
+                      value={formData.destinationUrl}
+                      onChange={(e) => setFormData({ ...formData, destinationUrl: e.target.value })}
+                      required
+                    />
+                    <Input
+                      label="Backup URL (For Blocked Visitors)"
+                      placeholder="https://fallback.com/backup"
+                      value={formData.fallbackUrl}
+                      onChange={(e) => setFormData({ ...formData, fallbackUrl: e.target.value })}
+                    />
+                  </div>
+
                   <div className="grid grid-cols-2 gap-4">
                     <Input
-                      label="Default Revenue ($)"
+                      label="Advertiser Revenue (₹)"
                       type="number"
-                      step="0.1"
+                      step="0.01"
                       value={formData.revenue}
                       onChange={(e) => setFormData({ ...formData, revenue: Number(e.target.value) })}
                     />
                     <Input
-                      label="Default Affiliate Payout ($)"
+                      label="Publisher Payout (₹)"
                       type="number"
-                      step="0.1"
+                      step="0.01"
                       value={formData.payout}
                       onChange={(e) => setFormData({ ...formData, payout: Number(e.target.value) })}
                     />
                   </div>
 
-                  <div className="border border-indigo-100 bg-indigo-50/50 p-4 rounded-xl space-y-3">
+                  <div className="border border-indigo-100 bg-indigo-50/40 p-4 rounded-xl space-y-3">
                     <div className="flex items-center gap-2">
                       <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                      <label className="font-bold text-slate-900 text-xs uppercase tracking-wider">Redirect Type & Referrer Hiding Mode</label>
+                      <label className="font-bold text-slate-900 text-xs uppercase tracking-wider">Link Redirect Method</label>
                     </div>
                     <Select
                       label=""
                       value={formData.redirectType}
                       onChange={(e) => setFormData({ ...formData, redirectType: e.target.value as any })}
                       options={[
-                        { value: "302", label: "HTTP 302 Found (Standard - Preserves Referrer)" },
-                        { value: "307", label: "HTTP 307 Temporary (Strict - Preserves Method & Referrer)" },
-                        { value: "meta", label: "Meta Refresh (Strips Referrer Header)" },
-                        { value: "double_meta", label: "Double Meta Refresh (100% Blank Referrer)" },
-                        { value: "custom_referrer", label: "Send Custom / Spoofed Referrer URL" }
+                        { value: "302", label: "Standard (Direct 302 - Strips Referrer via Policy Header)" },
+                        { value: "307", label: "Strict Direct (HTTP 307 - Preserves Request Method)" },
+                        { value: "meta", label: "Hide Source Domain (Meta Refresh)" },
+                        { value: "double_meta", label: "Complete Anonymous (Blank Referrer)" },
+                        { value: "custom_referrer", label: "Custom Referrer Brand" }
                       ]}
                     />
 
                     {formData.redirectType === "custom_referrer" && (
                       <Input
-                        label="Custom Referrer Domain / URL"
+                        label="Custom Referrer Brand Domain / URL"
                         placeholder="https://mycustombrand.com"
                         value={formData.customReferrerUrl}
                         onChange={(e) => setFormData({ ...formData, customReferrerUrl: e.target.value })}
@@ -664,104 +694,169 @@ export default function Offers() {
                   </div>
 
                   <Select
-                    label="Filter Violation Action"
+                    label="Action for Blocked Visitors"
                     value={formData.actionOnFilter}
                     onChange={(e) => setFormData({ ...formData, actionOnFilter: e.target.value as any })}
                     options={[
-                      { value: "redirect", label: "Redirect to Fallback URL" },
-                      { value: "block", label: "Block with 403 Access Denied" },
-                      { value: "log", label: "Log click & proceed to destination" },
-                      { value: "drop", label: "Drop Pixel ping silently" }
+                      { value: "redirect", label: "Send to Backup URL" },
+                      { value: "block", label: "Show Access Denied (403)" },
+                      { value: "log", label: "Log Click & Allow Through" },
+                      { value: "drop", label: "Drop Request Silently" }
                     ]}
                   />
                 </div>
               )}
 
-              {/* STEP 2: MULTIPLE TRACKING URLS */}
+              {/* STEP 2: PAGES & EVENTS */}
               {currentStep === 2 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <Shuffle className="w-4 h-4 text-indigo-600" />
-                    <div>
-                      <label className="font-bold text-slate-900 text-xs uppercase tracking-wider block">Multiple Tracking URLs (Weighted Rotation)</label>
-                      <p className="text-xs text-slate-500">Configure split landing page URLs with percentage weights (e.g. 50% URL A, 50% URL B).</p>
+                <div className="space-y-6">
+                  {/* Landing Page Rotation */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Shuffle className="w-4 h-4 text-indigo-600" />
+                      <div>
+                        <label className="font-bold text-slate-900 text-xs uppercase tracking-wider block">Landing Page Rotation & Split Testing</label>
+                        <p className="text-xs text-slate-500">Distribute visitors across multiple landing pages based on percentage weights (e.g. 50% Page A, 50% Page B).</p>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-                    <span className="font-semibold text-slate-700 text-xs block">Add Alternative Destination URL</span>
-                    <Input
-                      label="URL Label / Name"
-                      placeholder="e.g. Landing Page B - Promo"
-                      value={newTrackingUrl.name}
-                      onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, name: e.target.value })}
-                    />
-                    <Input
-                      label="Destination URL"
-                      placeholder="https://advertiser.com/landing-b?pub={pub_id}"
-                      value={newTrackingUrl.url}
-                      onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, url: e.target.value })}
-                    />
-                    <div className="grid grid-cols-2 gap-3 items-end">
-                      <Input
-                        label="Weight Percentage (0-100)"
-                        type="number"
-                        min="1"
-                        max="100"
-                        value={newTrackingUrl.weight}
-                        onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, weight: Number(e.target.value) })}
-                      />
-                      <Button type="button" onClick={handleAddTrackingUrl} className="bg-indigo-600 hover:bg-indigo-500 text-xs gap-1">
-                        <Plus size={14} /> Add Rotation URL
-                      </Button>
+                    <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <span className="font-semibold text-slate-700 text-xs block">Add Additional Landing Page</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <Input
+                          label="Page Label"
+                          placeholder="e.g. Promo Landing Page B"
+                          value={newTrackingUrl.name}
+                          onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, name: e.target.value })}
+                        />
+                        <Input
+                          label="Destination URL"
+                          placeholder="https://advertiser.com/landing-b?pub={pub_id}"
+                          value={newTrackingUrl.url}
+                          onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, url: e.target.value })}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 items-end">
+                        <Input
+                          label="Weight Percentage (1 - 100)"
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={newTrackingUrl.weight}
+                          onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, weight: Number(e.target.value) })}
+                        />
+                        <Button type="button" onClick={handleAddTrackingUrl} className="bg-indigo-600 hover:bg-indigo-500 text-xs gap-1 cursor-pointer">
+                          <Plus size={14} /> Add Rotation Page
+                        </Button>
+                      </div>
                     </div>
-                  </div>
 
-                  {formData.trackingUrls.length > 0 ? (
-                    <div className="space-y-2 border border-slate-200 rounded-xl overflow-hidden text-xs">
-                      {formData.trackingUrls.map((item) => (
-                        <div key={item.id} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100">
-                          <div className="min-w-0 flex-1 pr-2">
-                            <div className="font-bold text-slate-900 flex items-center gap-2">
-                              {item.name}
-                              <Badge variant="primary" className="bg-indigo-50 text-indigo-700 text-[10px]">
-                                Weight: {item.weight}%
-                              </Badge>
+                    {formData.trackingUrls.length > 0 ? (
+                      <div className="space-y-2 border border-slate-200 rounded-xl overflow-hidden text-xs">
+                        {formData.trackingUrls.map((item) => (
+                          <div key={item.id} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100">
+                            <div className="min-w-0 flex-1 pr-2">
+                              <div className="font-bold text-slate-900 flex items-center gap-2">
+                                {item.name}
+                                <Badge variant="primary" className="bg-indigo-50 text-indigo-700 text-[10px]">
+                                  Weight: {item.weight}%
+                                </Badge>
+                              </div>
+                              <div className="text-slate-500 font-mono truncate text-[11px] mt-0.5">{item.url}</div>
                             </div>
-                            <div className="text-slate-500 font-mono truncate text-[11px] mt-0.5">{item.url}</div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveTrackingUrl(item.id)}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0 cursor-pointer"
+                            >
+                              <Trash2 size={15} />
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveTrackingUrl(item.id)}
-                            className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                        No additional rotation pages added. All visitors will go to the Main Landing Page URL.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Custom Conversion Events */}
+                  <div className="border-t border-slate-200 pt-5 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-indigo-600" />
+                      <div>
+                        <label className="font-bold text-slate-900 text-xs uppercase tracking-wider block">Custom Conversion Events & Payouts</label>
+                        <p className="text-xs text-slate-500">Assign specific payout amounts for different user actions (e.g. Lead, Sale, App Install).</p>
+                      </div>
                     </div>
-                  ) : (
-                    <div className="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                      No additional rotation URLs added. Traffic will route 100% to Primary Destination URL.
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <Input
+                        label="Event Name"
+                        placeholder="e.g. signup, sale, install"
+                        value={newEvent.eventName}
+                        onChange={(e) => setNewEvent({ ...newEvent, eventName: e.target.value })}
+                      />
+                      <Input
+                        label="Revenue (₹)"
+                        type="number"
+                        step="0.01"
+                        value={newEvent.revenue}
+                        onChange={(e) => setNewEvent({ ...newEvent, revenue: Number(e.target.value) })}
+                      />
+                      <Input
+                        label="Payout (₹)"
+                        type="number"
+                        step="0.01"
+                        value={newEvent.payout}
+                        onChange={(e) => setNewEvent({ ...newEvent, payout: Number(e.target.value) })}
+                      />
                     </div>
-                  )}
+                    <Button type="button" onClick={handleAddEvent} variant="outline" className="w-full text-xs gap-1 border-indigo-200 text-indigo-700 hover:bg-indigo-50 cursor-pointer">
+                      <Plus size={14} /> Add Event Payout Rule
+                    </Button>
+
+                    {formData.eventsList.length > 0 && (
+                      <div className="space-y-2 border border-slate-200 rounded-xl overflow-hidden text-xs">
+                        {formData.eventsList.map((ev, i) => (
+                          <div key={i} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100">
+                            <div className="font-bold text-slate-800 flex items-center gap-3">
+                              <Badge variant="primary" className="bg-indigo-100 text-indigo-800 font-mono text-[11px]">
+                                &event={ev.eventName}
+                              </Badge>
+                              <span>Revenue: <b>₹{ev.revenue}</b></span>
+                              <span>Payout: <b>₹{ev.payout}</b></span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEvent(i)}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0 cursor-pointer"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
-              {/* STEP 3: SESSION CHECK & CAPPING */}
+              {/* STEP 3: CAPS & PROTECTION */}
               {currentStep === 3 && (
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="border border-indigo-100 bg-indigo-50/50 p-4 rounded-xl space-y-3">
                     <Switch
                       checked={formData.sessionCheckEnabled}
                       onChange={(val) => setFormData({ ...formData, sessionCheckEnabled: val })}
-                      label="Enable Session Validation (Session Check)"
-                      description="Requires incoming conversion postbacks to belong to a valid, non-expired click session token."
+                      label="Require Session Cookie (Session Validation)"
+                      description="Only count conversions from visitors who have an active, valid tracking cookie."
                     />
 
                     {formData.sessionCheckEnabled && (
                       <Input
-                        label="Session Expiration Window TTL (Minutes)"
+                        label="Session Lifetime (Minutes)"
                         type="number"
                         placeholder="1440 (Default 24 Hours)"
                         value={formData.sessionTtlMinutes}
@@ -770,21 +865,22 @@ export default function Offers() {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Input
-                      label="Daily Click Cap (0 = Unlimited)"
+                      label="Daily Limit (Max Clicks per Day, 0 = Unlimited)"
                       type="number"
                       value={formData.dailyCap}
                       onChange={(e) => setFormData({ ...formData, dailyCap: Number(e.target.value) })}
                     />
                     <Input
-                      label="Hourly Click Cap (0 = Unlimited)"
+                      label="Hourly Limit (Max Clicks per Hour, 0 = Unlimited)"
                       type="number"
                       value={formData.hourlyCap}
                       onChange={(e) => setFormData({ ...formData, hourlyCap: Number(e.target.value) })}
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Input
                       label="Campaign Start Date/Time"
                       type="datetime-local"
@@ -798,34 +894,38 @@ export default function Offers() {
                       onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
                     />
                   </div>
+
                   <Input
-                    label="Duplicate IP Filter Window (Minutes)"
+                    label="Repeat Click Protection (Minutes)"
                     type="number"
-                    placeholder="e.g. 15 (Blocks repeat clicks within 15 mins)"
+                    placeholder="e.g. 15 (Ignores repeat clicks from same IP within 15 mins)"
                     value={formData.duplicateWindowMinutes}
                     onChange={(e) => setFormData({ ...formData, duplicateWindowMinutes: Number(e.target.value) })}
                   />
                 </div>
               )}
 
-              {/* STEP 4: TARGETING */}
+              {/* STEP 4: AUDIENCE & RULES */}
               {currentStep === 4 && (
-                <div className="space-y-4">
-                  <Input
-                    label="Geo Country Codes (CSV)"
-                    placeholder="e.g. US, CA, GB (Leave blank for ALL)"
-                    value={formData.geoTargeting}
-                    onChange={(e) => setFormData({ ...formData, geoTargeting: e.target.value })}
-                  />
-                  <Input
-                    label="City Restrictions (CSV)"
-                    placeholder="e.g. NEW YORK, LONDON"
-                    value={formData.cityTargeting}
-                    onChange={(e) => setFormData({ ...formData, cityTargeting: e.target.value })}
-                  />
-                  <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Input
+                      label="Allowed Countries (CSV)"
+                      placeholder="e.g. US, CA, GB (Leave blank for ALL)"
+                      value={formData.geoTargeting}
+                      onChange={(e) => setFormData({ ...formData, geoTargeting: e.target.value })}
+                    />
+                    <Input
+                      label="Allowed Cities (CSV)"
+                      placeholder="e.g. NEW YORK, LONDON"
+                      value={formData.cityTargeting}
+                      onChange={(e) => setFormData({ ...formData, cityTargeting: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Select
-                      label="Device Restriction"
+                      label="Target Device"
                       value={formData.deviceType}
                       onChange={(e) => setFormData({ ...formData, deviceType: e.target.value as any })}
                       options={[
@@ -835,7 +935,7 @@ export default function Offers() {
                       ]}
                     />
                     <Select
-                      label="OS Restriction"
+                      label="Target Operating System"
                       value={formData.osType}
                       onChange={(e) => setFormData({ ...formData, osType: e.target.value as any })}
                       options={[
@@ -846,47 +946,50 @@ export default function Offers() {
                       ]}
                     />
                   </div>
-                  <Input
-                    label="Browser Restrictions (CSV)"
-                    placeholder="e.g. CHROME, SAFARI"
-                    value={formData.browserTargeting}
-                    onChange={(e) => setFormData({ ...formData, browserTargeting: e.target.value })}
-                  />
-                  <Input
-                    label="ISP Restrictions (CSV)"
-                    placeholder="e.g. VERIZON, COMCAST"
-                    value={formData.ispTargeting}
-                    onChange={(e) => setFormData({ ...formData, ispTargeting: e.target.value })}
-                  />
 
-                  {/* Pixel Trigger & Manual Page Targeting Section */}
-                  <div className="border-t border-slate-200 pt-4 space-y-4">
-                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Client Pixel & Page Targeting Controls</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Input
+                      label="Allowed Browsers (CSV)"
+                      placeholder="e.g. CHROME, SAFARI"
+                      value={formData.browserTargeting}
+                      onChange={(e) => setFormData({ ...formData, browserTargeting: e.target.value })}
+                    />
+                    <Input
+                      label="Allowed Internet Providers (CSV)"
+                      placeholder="e.g. VERIZON, COMCAST"
+                      value={formData.ispTargeting}
+                      onChange={(e) => setFormData({ ...formData, ispTargeting: e.target.value })}
+                    />
+                  </div>
+
+                  {/* Pixel Trigger Controls */}
+                  <div className="border-t border-slate-200 pt-5 space-y-4">
+                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Page Pixel & Frequency Settings</h4>
                     
                     <Input
-                      label="Manual Page Targeting (URL Path Whitelist CSV)"
+                      label="Specific Webpages Only (URL Path Whitelist CSV)"
                       placeholder="e.g. /checkout, /thank-you (Leave blank for ALL pages)"
                       value={formData.targetPages}
                       onChange={(e) => setFormData({ ...formData, targetPages: e.target.value })}
                     />
 
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <Input
-                        label="Initial Trigger Delay (ms)"
+                        label="Wait Time Before Firing (ms)"
                         type="number"
                         placeholder="0 (Instant)"
                         value={formData.triggerDelayMs}
                         onChange={(e) => setFormData({ ...formData, triggerDelayMs: Number(e.target.value) })}
                       />
                       <Input
-                        label="Repeat Interval (ms)"
+                        label="Repeat Fire Interval (ms)"
                         type="number"
                         placeholder="0 (Disabled)"
                         value={formData.triggerIntervalMs}
                         onChange={(e) => setFormData({ ...formData, triggerIntervalMs: Number(e.target.value) })}
                       />
                       <Input
-                        label="Max Repeat Count"
+                        label="Maximum Times to Fire"
                         type="number"
                         placeholder="0 (Unlimited)"
                         value={formData.triggerRepeatCount}
@@ -895,33 +998,144 @@ export default function Offers() {
                     </div>
 
                     <Select
-                      label="Pixel Frequency Capping"
+                      label="How Often Pixel Fires"
                       value={formData.frequencyCap}
                       onChange={(e) => setFormData({ ...formData, frequencyCap: e.target.value as any })}
                       options={[
-                        { value: "unlimited", label: "Unlimited (Fire every page load)" },
-                        { value: "once_per_session", label: "Once per Session (sessionStorage)" },
-                        { value: "once_per_user", label: "Once per User (localStorage)" }
+                        { value: "unlimited", label: "Every Page Load" },
+                        { value: "once_per_session", label: "Once per Visit (Session)" },
+                        { value: "once_per_user", label: "Once per Person (Forever)" }
                       ]}
                     />
+                  </div>
+
+                  {/* Weighted Custom Page Rules */}
+                  <div className="border-t border-slate-200 pt-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                        <Shuffle size={13} className="text-indigo-500" />
+                        Custom Page Rules
+                      </h4>
+                      <span className="text-[10px] text-slate-400">{(formData.targetPageRules || []).length} rule{(formData.targetPageRules || []).length !== 1 ? "s" : ""}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">Target specific pages with weights and custom delay overrides — e.g. 60% weight on <code>/checkout</code>, 40% weight on <code>/thank-you</code>.</p>
+
+                    {/* Existing rules list */}
+                    {(formData.targetPageRules || []).length > 0 && (
+                      <div className="space-y-2">
+                        {(formData.targetPageRules || []).map((rule) => (
+                          <div key={rule.id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <code className="text-xs font-mono font-bold text-indigo-700 truncate">{rule.path}</code>
+                                <span className="text-[10px] text-slate-400 shrink-0">{rule.matchType}</span>
+                              </div>
+                              <div className="flex items-center gap-3 mt-0.5">
+                                <span className="text-[10px] text-slate-500">Weight: <b>{rule.weight}%</b></span>
+                                <span className="text-[10px] text-slate-500">Delay: <b>{rule.delayMs}ms</b></span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setFormData(prev => ({
+                                  ...prev,
+                                  targetPageRules: (prev.targetPageRules || []).map(r =>
+                                    r.id === rule.id ? { ...r, status: r.status === "active" ? "paused" : "active" } : r
+                                  )
+                                }))}
+                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full cursor-pointer ${rule.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
+                              >{rule.status === "active" ? "Active" : "Paused"}</button>
+                              <button
+                                type="button"
+                                onClick={() => setFormData(prev => ({
+                                  ...prev,
+                                  targetPageRules: (prev.targetPageRules || []).filter(r => r.id !== rule.id)
+                                }))}
+                                className="text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
+                              ><Trash2 size={13} /></button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Add new rule row */}
+                    <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-4 space-y-3">
+                      <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider">Add Page Rule</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <Input
+                          label="URL Path"
+                          placeholder="/checkout"
+                          value={newPageRule.path}
+                          onChange={(e) => setNewPageRule(p => ({ ...p, path: e.target.value }))}
+                        />
+                        <Select
+                          label="Match Type"
+                          value={newPageRule.matchType}
+                          onChange={(e) => setNewPageRule(p => ({ ...p, matchType: e.target.value as any }))}
+                          options={[
+                            { value: "contains", label: "Contains (default)" },
+                            { value: "exact", label: "Exact match" },
+                            { value: "startsWith", label: "Starts with" }
+                          ]}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Input
+                          label="Weight (%)"
+                          type="number"
+                          placeholder="50"
+                          value={newPageRule.weight}
+                          onChange={(e) => setNewPageRule(p => ({ ...p, weight: Number(e.target.value) }))}
+                        />
+                        <Input
+                          label="Delay Override (ms)"
+                          type="number"
+                          placeholder="0 (use global)"
+                          value={newPageRule.delayMs}
+                          onChange={(e) => setNewPageRule(p => ({ ...p, delayMs: Number(e.target.value) }))}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 cursor-pointer"
+                        onClick={() => {
+                          if (!newPageRule.path.trim()) return;
+                          const rule: TargetPageRule = {
+                            id: "pr-" + Math.random().toString(36).substring(2, 8),
+                            path: newPageRule.path.trim(),
+                            weight: Number(newPageRule.weight) || 50,
+                            delayMs: Number(newPageRule.delayMs) || 0,
+                            matchType: newPageRule.matchType,
+                            status: "active"
+                          };
+                          setFormData(prev => ({ ...prev, targetPageRules: [...(prev.targetPageRules || []), rule] }));
+                          setNewPageRule({ path: "", weight: 50, delayMs: 0, matchType: "contains", status: "active" });
+                        }}
+                      >
+                        <Plus size={14} /> Add Page Rule
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}
             </form>
 
-            {/* Drawer Footer */}
-            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-between items-center">
+            {/* Modal Footer Controls */}
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
               {currentStep > 1 ? (
-                <Button type="button" variant="outline" onClick={() => setCurrentStep(currentStep - 1)}>Previous</Button>
+                <Button type="button" variant="outline" onClick={prevStep} className="cursor-pointer">Previous</Button>
               ) : <div />}
 
               {currentStep < 4 ? (
-                <Button type="button" onClick={() => setCurrentStep(currentStep + 1)}>Next Step</Button>
+                <Button type="button" onClick={nextStep} className="bg-indigo-600 hover:bg-indigo-500 font-bold px-6 cursor-pointer">Next Step</Button>
               ) : (
                 <Button
                   type="button"
                   onClick={handleCreateOrUpdate}
-                  className="bg-indigo-600 hover:bg-indigo-500 font-bold px-6 gap-2"
+                  className="bg-indigo-600 hover:bg-indigo-500 font-bold px-6 gap-2 cursor-pointer"
                   disabled={submitting}
                 >
                   {submitting ? <RefreshCw size={14} className="animate-spin" /> : null}
@@ -929,6 +1143,7 @@ export default function Offers() {
                 </Button>
               )}
             </div>
+
           </div>
         </div>
       )}
