@@ -135,7 +135,7 @@ export default function Settings() {
   const strength = pwStrength(pwForm.newPassword);
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-6 animate-fadeIn pb-12">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">System Settings</h2>
@@ -269,10 +269,11 @@ export default function Settings() {
               <div className="space-y-3">
                 <p className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">3. S2S Postback (Conversion Tracking)</p>
                 <CodeSnippet
-                  code={`${origin}/api/postback?click_id={CLICK_ID}&payout=15.00&revenue=30.00&event=sale`}
+                  code={`${origin}/api/postback?click_id={CLICK_ID}&token=npc_postback_sec_2026&payout=15.00&revenue=30.00&event=sale`}
                 />
                 <ul className="list-disc list-inside text-slate-500 space-y-1 ml-1">
                   <li><code className="font-mono font-bold text-slate-700">click_id</code> — Required. The click ID returned in tracking URL or pixel response.</li>
+                  <li><code className="font-mono font-bold text-slate-700">token</code> — Required (if enabled). Security authentication secret token.</li>
                   <li><code className="font-mono font-bold text-slate-700">payout</code> — Optional. Override affiliate payout for this conversion.</li>
                   <li><code className="font-mono font-bold text-slate-700">revenue</code> — Optional. Override advertiser revenue for this conversion.</li>
                   <li><code className="font-mono font-bold text-slate-700">event</code> — Optional. Event tier name (e.g. <code>lead</code>, <code>sale</code>, <code>install</code>).</li>

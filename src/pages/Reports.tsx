@@ -121,7 +121,7 @@ export default function Reports() {
   const totalPages = Math.ceil(totalRecords / limit) || 1;
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-6 animate-fadeIn pb-12">
       {/* Header section */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
         <div>

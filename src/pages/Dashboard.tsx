@@ -207,7 +207,7 @@ export default function Dashboard() {
     : "100";
 
   return (
-    <div className="space-y-8 animate-fadeIn">
+    <div className="space-y-8 animate-fadeIn pb-12">
       {/* Header section with live buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
         <div>
@@ -549,10 +549,12 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-          <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl mt-6">
-            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">Developer Notice</h4>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Tracking links generate absolute redirection. Copy links from the Campaigns tab to test active routing workflows directly!
+          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl mt-6 text-white shadow-sm">
+            <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              <CheckCircle2 size={14} className="text-emerald-400" /> Operational Readiness
+            </h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Redirect engine & S2S postback attribution operating at optimal baseline performance.
             </p>
           </div>
         </div>
