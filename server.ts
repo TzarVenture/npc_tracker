@@ -689,6 +689,11 @@ app.get("/clean-redirect", (req, res) => {
   const dest = req.query.dest as string;
   if (!dest) return res.status(400).send("<h1>Error: Missing destination</h1>");
 
+  // Validate destination URL protocol to prevent Open Redirects & XSS (e.g., javascript:, data:)
+  if (!/^https?:\/\//i.test(dest)) {
+    return res.status(400).send("<h1>Error: Invalid destination URL protocol</h1>");
+  }
+
   res.type("html").send(`
 <!DOCTYPE html>
 <html>
