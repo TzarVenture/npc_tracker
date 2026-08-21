@@ -686,8 +686,13 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
 
 // Clean Redirect intermediate handler for Double Meta Refresh
 app.get("/clean-redirect", (req, res) => {
-  const dest = req.query.dest as string;
-  if (!dest) return res.status(400).send("<h1>Error: Missing destination</h1>");
+  const dest = (req.query.dest as string || "").trim();
+
+  // Security Validation: Ensure destination strictly uses http:// or https:// scheme
+  // to prevent Open Redirects and protocol-based XSS (e.g. javascript: or data: URIs)
+  if (!dest || !/^https?:\/\//i.test(dest)) {
+    return res.status(400).send("<h1>Error: Invalid or missing destination URL</h1>");
+  }
 
   res.type("html").send(`
 <!DOCTYPE html>
