@@ -43,6 +43,12 @@ import { Offer, Click, Conversion } from "./src/types";
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
+// Escapes special HTML characters inside JSON strings embedded within inline <script> blocks
+// to prevent XSS / script breakout attacks (e.g., </script> or <svg/onload=...>)
+const safeJsonStringify = (data: any): string => {
+  return JSON.stringify(data).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+};
+
 // Warn if JWT secret is the insecure hardcoded fallback
 if (!process.env.JWT_SECRET) {
   console.warn("\n  ⚠️  WARNING: JWT_SECRET is not set in .env — using insecure default. Set a strong secret before production deployment!\n");
@@ -633,7 +639,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(targetUrl)});</script>
+  <script>window.location.replace(${safeJsonStringify(targetUrl)});</script>
 </body>
 </html>
     `);
@@ -652,7 +658,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   <script>
     (function(){
       try { document.referrer; } catch(e) {}
-      window.location.replace(${JSON.stringify(targetUrl)});
+      window.location.replace(${safeJsonStringify(targetUrl)});
     })();
   </script>
 </body>
@@ -671,8 +677,8 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
 </head>
 <body>
   <script>
-    ${customRef ? `try { history.replaceState(null, "", "${customRef}"); } catch(e) {}` : ''}
-    window.location.replace(${JSON.stringify(targetUrl)});
+    ${customRef ? `try { history.replaceState(null, "", ${safeJsonStringify(customRef)}); } catch(e) {}` : ''}
+    window.location.replace(${safeJsonStringify(targetUrl)});
   </script>
 </body>
 </html>
@@ -689,6 +695,11 @@ app.get("/clean-redirect", (req, res) => {
   const dest = req.query.dest as string;
   if (!dest) return res.status(400).send("<h1>Error: Missing destination</h1>");
 
+  // Validate destination URL protocol to prevent Open Redirects and javascript:/data: execution vectors
+  if (!/^https?:\/\//i.test(dest)) {
+    return res.status(400).send("<h1>Error: Invalid destination URL protocol</h1>");
+  }
+
   res.type("html").send(`
 <!DOCTYPE html>
 <html>
@@ -699,7 +710,7 @@ app.get("/clean-redirect", (req, res) => {
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(dest)});</script>
+  <script>window.location.replace(${safeJsonStringify(dest)});</script>
 </body>
 </html>
   `);
