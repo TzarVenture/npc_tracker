@@ -633,7 +633,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(targetUrl)});</script>
+  <script>window.location.replace(${safeJsonStringify(targetUrl)});</script>
 </body>
 </html>
     `);
@@ -652,7 +652,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   <script>
     (function(){
       try { document.referrer; } catch(e) {}
-      window.location.replace(${JSON.stringify(targetUrl)});
+      window.location.replace(${safeJsonStringify(targetUrl)});
     })();
   </script>
 </body>
@@ -672,7 +672,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
 <body>
   <script>
     ${customRef ? `try { history.replaceState(null, "", "${customRef}"); } catch(e) {}` : ''}
-    window.location.replace(${JSON.stringify(targetUrl)});
+    window.location.replace(${safeJsonStringify(targetUrl)});
   </script>
 </body>
 </html>
@@ -684,10 +684,20 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   return res.redirect(302, targetUrl);
 };
 
+// Helper to safely serialize JSON into HTML script blocks escaping HTML tag breakout sequences
+const safeJsonStringify = (data: any): string => {
+  return JSON.stringify(data).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+};
+
 // Clean Redirect intermediate handler for Double Meta Refresh
 app.get("/clean-redirect", (req, res) => {
   const dest = req.query.dest as string;
   if (!dest) return res.status(400).send("<h1>Error: Missing destination</h1>");
+
+  // Validate destination URL protocol to prevent Open Redirects and script execution (e.g. javascript: or data:)
+  if (!/^https?:\/\//i.test(dest)) {
+    return res.status(400).send("<h1>Error: Invalid destination URL. Must start with http:// or https://</h1>");
+  }
 
   res.type("html").send(`
 <!DOCTYPE html>
@@ -699,7 +709,7 @@ app.get("/clean-redirect", (req, res) => {
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(dest)});</script>
+  <script>window.location.replace(${safeJsonStringify(dest)});</script>
 </body>
 </html>
   `);
