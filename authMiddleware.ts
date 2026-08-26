@@ -3,6 +3,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
 export const JWT_SECRET = process.env.JWT_SECRET || "npc_tracker_jwt_secret_key_2026";
+export const getJwtSecret = () => process.env.JWT_SECRET || JWT_SECRET;
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -21,7 +22,7 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string; username: string; role: string };
+    const decoded = jwt.verify(token, getJwtSecret()) as { id: string; username: string; role: string };
     req.user = decoded;
     next();
   } catch (err) {
