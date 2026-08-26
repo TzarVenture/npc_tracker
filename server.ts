@@ -45,7 +45,7 @@ import {
   deleteDomain,
   setDefaultDomain
 } from "./db";
-import { authMiddleware, AuthenticatedRequest, JWT_SECRET } from "./authMiddleware";
+import { authMiddleware, AuthenticatedRequest, getJwtSecret } from "./authMiddleware";
 import { Offer, Click, Conversion, TrackingDomain } from "./src/types";
 
 const app = express();
@@ -178,7 +178,7 @@ app.post("/api/auth/login", (req, res) => {
   clearAttempts(clientIp);
   const token = jwt.sign(
     { id: user.id, username: user.username, role: user.role },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: "24h" }
   );
 

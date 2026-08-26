@@ -2,8 +2,8 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-export const JWT_SECRET = process.env.JWT_SECRET || "npc_tracker_jwt_secret_key_2026";
-export const getJwtSecret = () => process.env.JWT_SECRET || JWT_SECRET;
+export const getJwtSecret = () => process.env.JWT_SECRET || "npc_tracker_jwt_secret_key_2026";
+export const JWT_SECRET = getJwtSecret();
 
 export interface AuthenticatedRequest extends Request {
   user?: {
