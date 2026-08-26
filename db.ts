@@ -1,18 +1,24 @@
-/* db.ts: Production SQLite database layer using better-sqlite3 with indexing & migration. */
-import Database from "better-sqlite3";
+/* db.ts: Production SQLite database layer using Node.js native node:sqlite with indexing & migration. */
+import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import fs from "fs";
 import bcrypt from "bcryptjs";
 import { Offer, Click, Conversion, TrackingDomain } from "./src/types";
 
-const DB_PATH = path.join(process.cwd(), "tracker.sqlite");
+const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), "tracker.sqlite");
 const OLD_DB_JSON = path.join(process.cwd(), "db.json");
 
+// Ensure parent directory exists for DB_PATH (essential for Docker volume mounts)
+const dbDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
 // Initialize SQLite database instance
-const db = new Database(DB_PATH);
+const db = new DatabaseSync(DB_PATH);
 
 // Enable WAL (Write-Ahead Logging) mode for high performance concurrent reads and writes
-db.pragma("journal_mode = WAL");
+db.exec("PRAGMA journal_mode = WAL;");
 
 // Initialize table schemas
 export function initDB() {
@@ -861,7 +867,7 @@ function mapConversionRow(r: any): Conversion {
 export function pruneOldClicks(retentionDays = 30): number {
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
   const res = db.prepare("DELETE FROM clicks WHERE timestamp < ?").run(cutoff);
-  return res.changes;
+  return Number(res.changes);
 }
 
 // Clear all clicks, conversions, and reset campaign counters

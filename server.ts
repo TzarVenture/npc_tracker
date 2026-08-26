@@ -46,7 +46,7 @@ import { authMiddleware, AuthenticatedRequest, JWT_SECRET } from "./authMiddlewa
 import { Offer, Click, Conversion, TrackingDomain } from "./src/types";
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3001;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Warn if JWT secret is the insecure hardcoded fallback
 if (!process.env.JWT_SECRET) {
