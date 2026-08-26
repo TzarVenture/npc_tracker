@@ -28,11 +28,13 @@ import {
   Play,
   RefreshCw
 } from "lucide-react";
-import { Offer, OfferEvent, TrackingUrlItem, TargetPageRule } from "../types";
+import { Offer, OfferEvent, TrackingUrlItem, TargetPageRule, TrackingDomain } from "../types";
 
 export default function Offers() {
   const { showToast } = useToast();
   const [offers, setOffers] = useState<Offer[]>([]);
+  const [domains, setDomains] = useState<TrackingDomain[]>([]);
+  const [selectedDomain, setSelectedDomain] = useState<string>("");
   const [showDrawer, setShowDrawer] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
@@ -101,6 +103,7 @@ export default function Offers() {
 
   useEffect(() => {
     fetchOffers();
+    fetchDomains();
   }, []);
 
   const fetchOffers = async () => {
@@ -110,6 +113,17 @@ export default function Offers() {
     } catch (err: any) {
       showToast("error", "Failed to load campaigns", err?.response?.data?.error || "Please refresh the page.");
     }
+  };
+
+  const fetchDomains = async () => {
+    try {
+      const res = await axios.get("/api/domains");
+      setDomains(res.data);
+      const defaultDom = res.data.find((d: TrackingDomain) => d.isDefault);
+      if (defaultDom) {
+        setSelectedDomain(defaultDom.domain);
+      }
+    } catch (e) {}
   };
 
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
@@ -339,10 +353,18 @@ export default function Offers() {
     o.destinationUrl.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const getTrackingUrl = (offerId: string) => `${window.location.origin}/track?offer_id=${offerId}&pub_id={pub_id}&sub_id1={sub_id1}`;
-  const getPostbackUrl = (offerId: string) => `${window.location.origin}/api/postback?click_id={click_id}&token=npc_postback_sec_2026&revenue=10&payout=5`;
+  const getActiveBaseUrl = () => {
+    if (selectedDomain && selectedDomain.trim()) {
+      const clean = selectedDomain.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+      return `${window.location.protocol}//${clean}`;
+    }
+    return window.location.origin;
+  };
+
+  const getTrackingUrl = (offerId: string) => `${getActiveBaseUrl()}/track?offer_id=${offerId}&pub_id={pub_id}&sub_id1={sub_id1}`;
+  const getPostbackUrl = (offerId: string) => `${getActiveBaseUrl()}/api/postback?click_id={click_id}&token=npc_postback_sec_2026&revenue=10&payout=5`;
   // Stealth CDN URL — looks like a neutral analytics widget in page source & DevTools
-  const getScriptTag = (offerId: string) => `<script src="${window.location.origin}/cdn/v2/wgt.js?id=${offerId}" async></script>`;
+  const getScriptTag = (offerId: string) => `<script src="${getActiveBaseUrl()}/cdn/v2/wgt.js?id=${offerId}" async></script>`;
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
@@ -528,6 +550,28 @@ export default function Offers() {
               </button>
             </CardHeader>
             <CardContent className="space-y-6 pt-4 text-xs">
+              {/* Domain Selector */}
+              {domains.length > 0 && (
+                <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-lg flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Globe size={16} className="text-indigo-600 shrink-0" />
+                    <div>
+                      <span className="font-bold text-slate-800 block text-xs">Multi-Domain Tracking Link Generator</span>
+                      <span className="text-[11px] text-slate-500">Select tracking domain to format all generated links:</span>
+                    </div>
+                  </div>
+                  <Select
+                    value={selectedDomain}
+                    onChange={(e) => setSelectedDomain(e.target.value)}
+                    options={[
+                      { value: "", label: `Default Server (${window.location.host})` },
+                      ...domains.map(d => ({ value: d.domain, label: `${d.domain} ${d.isDefault ? '(Default)' : ''}` }))
+                    ]}
+                    className="w-56 text-xs font-mono bg-white"
+                  />
+                </div>
+              )}
+
               {/* Redirect Link */}
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">1. Link Redirect URL (For Affiliates/Publishers)</label>

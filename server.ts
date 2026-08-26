@@ -35,13 +35,18 @@ import {
   getClicksTodayCount,
   getClicksHourlyCount,
   hasRecentClickFromIp,
-  incrementOfferClickCount
+  incrementOfferClickCount,
+  clearAllTelemetryData,
+  getAllDomains,
+  saveDomain,
+  deleteDomain,
+  setDefaultDomain
 } from "./db";
 import { authMiddleware, AuthenticatedRequest, JWT_SECRET } from "./authMiddleware";
-import { Offer, Click, Conversion } from "./src/types";
+import { Offer, Click, Conversion, TrackingDomain } from "./src/types";
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 3001;
 
 // Warn if JWT secret is the insecure hardcoded fallback
 if (!process.env.JWT_SECRET) {
@@ -552,6 +557,58 @@ app.delete("/api/publishers/:id", authMiddleware, (req, res) => {
   const { id } = req.params;
   deletePublisher(id);
   res.json({ success: true, message: "Publisher removed." });
+});
+
+// Clear all test click & conversion telemetry data
+app.post("/api/telemetry/reset", authMiddleware, (req, res) => {
+  clearAllTelemetryData();
+  res.json({ success: true, message: "All test clicks and conversions have been cleared." });
+});
+
+// Multi-Domain Tracking REST APIs
+app.get("/api/domains", (req, res) => {
+  res.json(getAllDomains());
+});
+
+app.post("/api/domains", authMiddleware, (req, res) => {
+  const { domain, isDefault } = req.body;
+  if (!domain || !domain.trim()) {
+    return res.status(400).json({ error: "Domain name is required." });
+  }
+
+  let cleanDomain = domain.trim().toLowerCase()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+
+  const newDomain: TrackingDomain = {
+    id: "dom-" + Math.random().toString(36).substring(2, 9),
+    domain: cleanDomain,
+    isDefault: Boolean(isDefault),
+    status: "active",
+    createdAt: new Date().toISOString()
+  };
+
+  try {
+    const saved = saveDomain(newDomain);
+    res.status(201).json(saved);
+  } catch (err: any) {
+    if (err.message && err.message.includes("UNIQUE")) {
+      return res.status(409).json({ error: `Domain "${cleanDomain}" already exists.` });
+    }
+    res.status(500).json({ error: "Failed to save domain." });
+  }
+});
+
+app.delete("/api/domains/:id", authMiddleware, (req, res) => {
+  const { id } = req.params;
+  deleteDomain(id);
+  res.json({ success: true, message: "Domain removed." });
+});
+
+app.put("/api/domains/:id/default", authMiddleware, (req, res) => {
+  const { id } = req.params;
+  setDefaultDomain(id);
+  res.json({ success: true, message: "Default tracking domain updated." });
 });
 
 app.get("/api/blacklist", (req, res) => {
@@ -1078,137 +1135,31 @@ app.get("/track", (req, res) => {
 app.get("/cdn/v2/wgt.js", (req, res) => {
   try {
     const offerId = String(req.query.id || "");
-  const offer = offerId ? getOfferById(offerId) : undefined;
+    const offer = offerId ? getOfferById(offerId) : undefined;
 
-  if (!offer) {
-    // Silent empty script — no errors exposed to visitor console
-    return res.type("application/javascript")
-      .set("Cache-Control", "no-store")
-      .send("(function(){})();");
-  }
-
-  const targetPagesStr = offer.targetPages && offer.targetPages.length > 0
-    ? JSON.stringify(offer.targetPages) : "[]";
-  const targetPageRulesStr = offer.targetPageRules && offer.targetPageRules.length > 0
-    ? JSON.stringify(offer.targetPageRules) : "[]";
-  const delayMs = offer.triggerDelayMs || 0;
-  const intervalMs = offer.triggerIntervalMs || 0;
-  const repeatCount = offer.triggerRepeatCount || 0;
-  const freqCap = offer.frequencyCap || "unlimited";
-  const pixelEndpoint = `${req.protocol}://${req.get('host')}/px`;
-
-  const scriptContent = `(function(){
-  try{
-    var _c={
-      oid:${JSON.stringify(offerId)},
-      tp:${targetPagesStr},
-      tpr:${targetPageRulesStr},
-      dMs:${delayMs},
-      iMs:${intervalMs},
-      rc:${repeatCount},
-      fc:${JSON.stringify(freqCap)},
-      ep:${JSON.stringify(pixelEndpoint)}
-    };
-
-    // Page targeting — check if current URL path matches whitelist or weighted rules
-    var _matchPage=function(){
-      var p=window.location.pathname;
-      // Weighted TargetPageRules (advanced mode)
-      if(_c.tpr&&_c.tpr.length>0){
-        var active=_c.tpr.filter(function(r){return r.status==='active';});
-        if(active.length===0)return null;
-        var matched=active.filter(function(r){
-          if(r.matchType==='exact')return p===r.path;
-          if(r.matchType==='startsWith')return p.indexOf(r.path)===0;
-          return p.indexOf(r.path)>-1;
-        });
-        if(matched.length===0)return null;
-        var total=matched.reduce(function(s,r){return s+(r.weight||0);},0);
-        if(total<=0)return matched[0];
-        var rand=Math.random()*total;
-        for(var i=0;i<matched.length;i++){
-          rand-=(matched[i].weight||0);
-          if(rand<0)return matched[i];
-        }
-        return matched[0];
-      }
-      // Simple flat targetPages whitelist
-      if(_c.tp&&_c.tp.length>0){
-        var ok=_c.tp.some(function(pg){return p.indexOf(pg)>-1;});
-        return ok?{}:null;
-      }
-      return {};
-    };
-
-    var _rule=_matchPage();
-    if(_rule===null)return;
-
-    var _sk="_ts_"+_c.oid;
-    var _uk="_tu_"+_c.oid;
-    // Frequency cap — protected from Safari Private Mode SecurityError
-    try{
-      if(_c.fc==="once_per_session"&&sessionStorage.getItem(_sk))return;
-      if(_c.fc==="once_per_user"&&localStorage.getItem(_uk))return;
-    }catch(e){}
-
-    var _n=0;
-
-    var _fire=function(){
-      try{
-        try{
-          if(_c.fc==="once_per_session")sessionStorage.setItem(_sk,"1");
-          if(_c.fc==="once_per_user")localStorage.setItem(_uk,"1");
-        }catch(e){}
-        var _q=new URLSearchParams(window.location.search);
-        var _pd=JSON.stringify({
-          offer_id:_c.oid,
-          pub_id:_q.get("pub_id")||"",
-          sub_id1:_q.get("sub_id1")||"",
-          page_url:window.location.href
-        });
-        // sendBeacon is fire-and-forget — zero page blocking, works even on page close
-        var _sent=false;
-        if(typeof navigator.sendBeacon==="function"){
-          try{
-            _sent=navigator.sendBeacon(_c.ep,new Blob([_pd],{type:"application/json"}));
-          }catch(e){}
-        }
-        if(!_sent){
-          try{
-            fetch(_c.ep,{method:"POST",headers:{"Content-Type":"application/json"},body:_pd,keepalive:true})
-              .catch(function(){});
-          }catch(e){}
-        }
-        _n++;
-      }catch(e){}
-    };
-
-    var _start=function(){
-      _fire();
-      if(_c.iMs>0&&(_c.rc===0||_c.rc>1)){
-        var _t=setInterval(function(){
-          try{
-            if(_c.rc>0&&_n>=_c.rc){clearInterval(_t);return;}
-            _fire();
-          }catch(e){clearInterval(_t);}
-        },_c.iMs);
-      }
-    };
-
-    // Per-rule delay override takes priority over global delayMs
-    var _delay=(_rule&&_rule.delayMs!=null)?_rule.delayMs:_c.dMs;
-    if(_delay>0){
-      setTimeout(_start,_delay);
-    }else{
-      _start();
+    if (!offer) {
+      // Silent empty script — no errors exposed to visitor console
+      return res.type("application/javascript")
+        .set("Cache-Control", "no-store")
+        .send("(function(){})();");
     }
-  }catch(e){}
-})();`;
 
-  res.type("application/javascript")
-    .set("Cache-Control", "no-store, no-cache")
-    .set("X-Content-Type-Options", "nosniff")
-    .send(scriptContent);
+    const targetPagesStr = offer.targetPages && offer.targetPages.length > 0
+      ? JSON.stringify(offer.targetPages) : "[]";
+    const targetPageRulesStr = offer.targetPageRules && offer.targetPageRules.length > 0
+      ? JSON.stringify(offer.targetPageRules) : "[]";
+    const delayMs = offer.triggerDelayMs || 0;
+    const intervalMs = offer.triggerIntervalMs || 0;
+    const repeatCount = offer.triggerRepeatCount || 0;
+    const freqCap = offer.frequencyCap || "unlimited";
+    const pixelEndpoint = `${req.protocol}://${req.get('host')}/px`;
+
+    const scriptContent = `(function(){try{var _c={oid:${JSON.stringify(offerId)},tp:${targetPagesStr},tpr:${targetPageRulesStr},dMs:${delayMs},iMs:${intervalMs},rc:${repeatCount},fc:${JSON.stringify(freqCap)},ep:${JSON.stringify(pixelEndpoint)}};var _matchPage=function(){var p=window.location.pathname;if(_c.tpr&&_c.tpr.length>0){var active=_c.tpr.filter(function(r){return r.status==='active';});if(active.length===0)return null;var matched=active.filter(function(r){if(r.matchType==='exact')return p===r.path;if(r.matchType==='startsWith')return p.indexOf(r.path)===0;return p.indexOf(r.path)>-1;});if(matched.length===0)return null;var total=matched.reduce(function(s,r){return s+(r.weight||0);},0);if(total<=0)return matched[0];var rand=Math.random()*total;for(var i=0;i<matched.length;i++){rand-=(matched[i].weight||0);if(rand<0)return matched[i];}return matched[0];}if(_c.tp&&_c.tp.length>0){var ok=_c.tp.some(function(pg){return p.indexOf(pg)>-1;});return ok?{}:null;}return {};};var _rule=_matchPage();if(_rule===null)return;var _sk="_ts_"+_c.oid;var _uk="_tu_"+_c.oid;try{if(_c.fc==="once_per_session"&&sessionStorage.getItem(_sk))return;if(_c.fc==="once_per_user"&&localStorage.getItem(_uk))return;}catch(e){}var _n=0;var _fire=function(){try{try{if(_c.fc==="once_per_session")sessionStorage.setItem(_sk,"1");if(_c.fc==="once_per_user")localStorage.setItem(_uk,"1");}catch(e){}var _q=new URLSearchParams(window.location.search);var _pd=JSON.stringify({offer_id:_c.oid,pub_id:_q.get("pub_id")||"",sub_id1:_q.get("sub_id1")||"",page_url:window.location.href});var _sent=false;if(typeof navigator.sendBeacon==="function"){try{_sent=navigator.sendBeacon(_c.ep,new Blob([_pd],{type:"application/json"}));}catch(e){}}if(!_sent){try{fetch(_c.ep,{method:"POST",headers:{"Content-Type":"application/json"},body:_pd,keepalive:true}).catch(function(){});}catch(e){}}_n++;}catch(e){}};var _start=function(){_fire();if(_c.iMs>0&&(_c.rc===0||_c.rc>1)){var _t=setInterval(function(){try{if(_c.rc>0&&_n>=_c.rc){clearInterval(_t);return;}_fire();}catch(e){clearInterval(_t);}},_c.iMs);}};var _delay=(_rule&&_rule.delayMs!=null)?_rule.delayMs:_c.dMs;if(_delay>0){setTimeout(_start,_delay);}else{_start();}}catch(e){}})();`;
+
+    res.type("application/javascript")
+      .set("Cache-Control", "no-store, no-cache")
+      .set("X-Content-Type-Options", "nosniff")
+      .send(scriptContent);
   } catch (err) {
     console.error("Error generating script:", err);
     res.type("application/javascript").send("// Error generating tracker script");

@@ -123,3 +123,11 @@ export interface LoginResponse {
   user?: User;
   error?: string;
 }
+
+export interface TrackingDomain {
+  id: string;
+  domain: string;
+  isDefault: boolean;
+  status: 'active' | 'inactive';
+  createdAt: string;
+}

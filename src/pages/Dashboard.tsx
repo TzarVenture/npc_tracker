@@ -76,6 +76,8 @@ export default function Dashboard() {
 
   const [simResult, setSimResult] = useState<any | null>(null);
   const [simulating, setSimulating] = useState(false);
+  const [simPostbackLoading, setSimPostbackLoading] = useState(false);
+  const [simPostbackResult, setSimPostbackResult] = useState<any | null>(null);
 
   // User-agent presets
   const uaPresets = [
@@ -183,12 +185,31 @@ export default function Dashboard() {
       const res = await axios.post("/api/simulate", payload);
       setTimeout(() => {
         setSimResult(res.data);
+        setSimPostbackResult(null);
         setSimulating(false);
         fetchData(true);
       }, 700);
     } catch (err: any) {
       showToast("error", "Simulation failed", err?.response?.data?.error || "Please try again.");
       setSimulating(false);
+    }
+  };
+
+  const triggerPostbackFromSim = async (clickId: string) => {
+    setSimPostbackLoading(true);
+    setSimPostbackResult(null);
+
+    try {
+      const res = await axios.get(`/api/postback?click_id=${clickId}&token=npc_postback_sec_2026&revenue=100&payout=50`);
+      setSimPostbackResult({ success: true, data: res.data });
+      showToast("success", "S2S Postback Recorded!", `Conversion ${res.data.conversion._id} logged with ₹100 Revenue & ₹50 Payout.`);
+      fetchData(true);
+    } catch (err: any) {
+      const errorMsg = err?.response?.data?.error || "Failed to trigger S2S postback";
+      setSimPostbackResult({ success: false, error: errorMsg });
+      showToast("error", "Postback Rejected", errorMsg);
+    } finally {
+      setSimPostbackLoading(false);
     }
   };
 
@@ -584,6 +605,34 @@ export default function Dashboard() {
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+              {/* Quick Presets Bar */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">⚡ Quick Production Test Scenarios:</span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSimFormData({ ...simFormData, userAgentPreset: "Desktop", ip: "192.168.12.34", country: "US" })}
+                    className="text-xs px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-700 hover:border-indigo-500 hover:text-indigo-600 font-medium cursor-pointer shadow-2xs"
+                  >
+                    🟢 Clean Visitor (US)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSimFormData({ ...simFormData, userAgentPreset: "Googlebot", ip: "66.249.66.1", country: "US" })}
+                    className="text-xs px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-700 hover:border-amber-500 hover:text-amber-600 font-medium cursor-pointer shadow-2xs"
+                  >
+                    🤖 Crawler Bot (Googlebot)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSimFormData({ ...simFormData, userAgentPreset: "iPhone", ip: "103.21.244.0", country: "JP" })}
+                    className="text-xs px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-700 hover:border-rose-500 hover:text-rose-600 font-medium cursor-pointer shadow-2xs"
+                  >
+                    🚫 Restricted Geo (JP)
+                  </button>
+                </div>
+              </div>
+
               <form onSubmit={runSimulation} className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <Select
@@ -646,7 +695,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className="pt-2">
-                  <Button type="submit" disabled={simulating} className="w-full gap-2">
+                  <Button type="submit" disabled={simulating} className="w-full gap-2 bg-indigo-600 hover:bg-indigo-700">
                     {simulating ? (
                       <>
                         <RefreshCw size={16} className="animate-spin" />
@@ -685,6 +734,10 @@ export default function Dashboard() {
                   </div>
 
                   <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Generated Click ID:</span>
+                      <span className="text-indigo-300 font-bold">{simResult.click._id}</span>
+                    </div>
                     <div className="flex justify-between">
                       <span className="text-slate-400">Visitor Location:</span>
                       <span className="text-white font-semibold">{simResult.click.country} (IP: {simResult.click.ip})</span>
@@ -730,6 +783,48 @@ export default function Dashboard() {
                         {simResult.finalDest === "BLOCK_ACCESS_DENIED" ? "HTTP 403 Access Denied" : `302 Redirect to -> ${simResult.finalDest}`}
                       </div>
                     </div>
+
+                    {/* S2S Postback Simulation Action */}
+                    {simResult.outcome === "passed" && (
+                      <div className="pt-2 border-t border-slate-800 space-y-2">
+                        <span className="text-emerald-400 font-bold uppercase block text-[11px]">S2S Conversion Postback Test:</span>
+                        <Button
+                          type="button"
+                          onClick={() => triggerPostbackFromSim(simResult.click._id)}
+                          disabled={simPostbackLoading}
+                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 text-xs"
+                        >
+                          {simPostbackLoading ? (
+                            <>
+                              <RefreshCw size={14} className="animate-spin" />
+                              Firing S2S Conversion Postback...
+                            </>
+                          ) : (
+                            <>
+                              ⚡ Fire Test S2S Conversion Postback (₹100 Rev / ₹50 Payout)
+                            </>
+                          )}
+                        </Button>
+
+                        {simPostbackResult && (
+                          <div className={`p-2.5 rounded text-xs border ${
+                            simPostbackResult.success 
+                              ? "bg-emerald-950/60 border-emerald-800 text-emerald-300" 
+                              : "bg-rose-950/60 border-rose-800 text-rose-300"
+                          }`}>
+                            {simPostbackResult.success ? (
+                              <>
+                                🟢 <strong>Conversion Recorded!</strong> ID: {simPostbackResult.data.conversion._id} (Event: {simPostbackResult.data.conversion.eventName} | Revenue: ₹{simPostbackResult.data.conversion.revenue} | Payout: ₹{simPostbackResult.data.conversion.payout})
+                              </>
+                            ) : (
+                              <>
+                                🔴 <strong>Postback Rejected:</strong> {simPostbackResult.error}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

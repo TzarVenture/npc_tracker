@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 import bcrypt from "bcryptjs";
-import { Offer, Click, Conversion } from "./src/types";
+import { Offer, Click, Conversion, TrackingDomain } from "./src/types";
 
 const DB_PATH = path.join(process.cwd(), "tracker.sqlite");
 const OLD_DB_JSON = path.join(process.cwd(), "db.json");
@@ -104,6 +104,14 @@ export function initDB() {
       id TEXT PRIMARY KEY,
       pub_id TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS tracking_domains (
+      id TEXT PRIMARY KEY,
+      domain TEXT NOT NULL UNIQUE,
+      is_default INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active',
       created_at TEXT NOT NULL
     );
 
@@ -608,6 +616,37 @@ export function getPublisherByPubId(pubId: string): Publisher | undefined {
   return row ? { id: row.id, pubId: row.pub_id, name: row.name, createdAt: row.created_at } : undefined;
 }
 
+// Multi-Domain Tracking CRUD
+export function getAllDomains(): TrackingDomain[] {
+  const rows = db.prepare("SELECT * FROM tracking_domains ORDER BY is_default DESC, created_at DESC").all() as any[];
+  return rows.map(r => ({
+    id: r.id,
+    domain: r.domain,
+    isDefault: Boolean(r.is_default),
+    status: r.status || "active",
+    createdAt: r.created_at
+  }));
+}
+
+export function saveDomain(domainItem: TrackingDomain): TrackingDomain {
+  if (domainItem.isDefault) {
+    db.prepare("UPDATE tracking_domains SET is_default = 0").run();
+  }
+  db.prepare(
+    "INSERT INTO tracking_domains (id, domain, is_default, status, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(domain) DO UPDATE SET is_default = excluded.is_default, status = excluded.status"
+  ).run(domainItem.id, domainItem.domain, domainItem.isDefault ? 1 : 0, domainItem.status, domainItem.createdAt);
+  return domainItem;
+}
+
+export function deleteDomain(id: string): void {
+  db.prepare("DELETE FROM tracking_domains WHERE id = ?").run(id);
+}
+
+export function setDefaultDomain(id: string): void {
+  db.prepare("UPDATE tracking_domains SET is_default = 0").run();
+  db.prepare("UPDATE tracking_domains SET is_default = 1 WHERE id = ?").run(id);
+}
+
 // Stats & Aggregations
 export function getDashboardStats() {
   const offers = getAllOffers();
@@ -823,6 +862,13 @@ export function pruneOldClicks(retentionDays = 30): number {
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
   const res = db.prepare("DELETE FROM clicks WHERE timestamp < ?").run(cutoff);
   return res.changes;
+}
+
+// Clear all clicks, conversions, and reset campaign counters
+export function clearAllTelemetryData(): void {
+  db.prepare("DELETE FROM clicks").run();
+  db.prepare("DELETE FROM conversions").run();
+  db.prepare("UPDATE offers SET click_count = 0, total_conversions = 0").run();
 }
 
 // Initialize SQLite tables and indexes immediately upon import
