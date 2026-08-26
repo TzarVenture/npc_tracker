@@ -44,6 +44,15 @@ export default function Offers() {
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [postbackSecret, setPostbackSecret] = useState("npc_postback_sec_2026");
+
+  useEffect(() => {
+    axios.get("/api/system-config").then((res) => {
+      if (res.data?.postbackSecret) {
+        setPostbackSecret(res.data.postbackSecret);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -362,7 +371,7 @@ export default function Offers() {
   };
 
   const getTrackingUrl = (offerId: string) => `${getActiveBaseUrl()}/track?offer_id=${offerId}&pub_id={pub_id}&sub_id1={sub_id1}`;
-  const getPostbackUrl = (offerId: string) => `${getActiveBaseUrl()}/api/postback?click_id={click_id}&token=npc_postback_sec_2026&revenue=10&payout=5`;
+  const getPostbackUrl = (offerId: string) => `${getActiveBaseUrl()}/api/postback?click_id={click_id}&token=${postbackSecret}&revenue=10&payout=5`;
   // Stealth CDN URL — looks like a neutral analytics widget in page source & DevTools
   const getScriptTag = (offerId: string) => `<script src="${getActiveBaseUrl()}/cdn/v2/wgt.js?id=${offerId}" async></script>`;
 

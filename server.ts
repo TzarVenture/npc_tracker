@@ -231,6 +231,13 @@ app.get("/api/global-tracking", (req, res) => {
   res.json({ globalTracking: getGlobalTrackingState() });
 });
 
+app.get("/api/system-config", (req, res) => {
+  res.json({
+    postbackSecret: process.env.POSTBACK_SECRET || "npc_postback_sec_2026",
+    globalTracking: getGlobalTrackingState()
+  });
+});
+
 app.post("/api/global-tracking", authMiddleware, (req, res) => {
   const { active } = req.body;
   setGlobalTrackingState(active !== false);

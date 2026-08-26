@@ -59,8 +59,17 @@ export default function Dashboard() {
   const [geoData, setGeoData] = useState<any[]>([]);
   const [liveLogs, setLiveLogs] = useState<Click[]>([]);
   const [globalTracking, setGlobalTracking] = useState(true);
+  const [postbackSecret, setPostbackSecret] = useState("npc_postback_sec_2026");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    axios.get("/api/system-config").then((res) => {
+      if (res.data?.postbackSecret) {
+        setPostbackSecret(res.data.postbackSecret);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Traffic Simulator state
   const [showSimulator, setShowSimulator] = useState(false);
@@ -200,7 +209,7 @@ export default function Dashboard() {
     setSimPostbackResult(null);
 
     try {
-      const res = await axios.get(`/api/postback?click_id=${clickId}&token=npc_postback_sec_2026&revenue=100&payout=50`);
+      const res = await axios.get(`/api/postback?click_id=${clickId}&token=${postbackSecret}&revenue=100&payout=50`);
       setSimPostbackResult({ success: true, data: res.data });
       showToast("success", "S2S Postback Recorded!", `Conversion ${res.data.conversion._id} logged with ₹100 Revenue & ₹50 Payout.`);
       fetchData(true);

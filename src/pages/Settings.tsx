@@ -59,6 +59,15 @@ export default function Settings() {
   const { showToast } = useToast();
   const [dbStats, setDbStats] = useState<DbStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [postbackSecret, setPostbackSecret] = useState("npc_postback_sec_2026");
+
+  useEffect(() => {
+    axios.get("/api/system-config").then((res) => {
+      if (res.data?.postbackSecret) {
+        setPostbackSecret(res.data.postbackSecret);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Multi-Domain State
   const [domains, setDomains] = useState<TrackingDomain[]>([]);
@@ -323,7 +332,7 @@ export default function Settings() {
               <div className="space-y-3">
                 <p className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">3. S2S Postback (Conversion Tracking)</p>
                 <CodeSnippet
-                  code={`${origin}/api/postback?click_id={CLICK_ID}&token=npc_postback_sec_2026&payout=15.00&revenue=30.00&event=sale`}
+                  code={`${origin}/api/postback?click_id={CLICK_ID}&token=${postbackSecret}&payout=15.00&revenue=30.00&event=sale`}
                 />
                 <ul className="list-disc list-inside text-slate-500 space-y-1 ml-1">
                   <li><code className="font-mono font-bold text-slate-700">click_id</code> — Required. The click ID returned in tracking URL or pixel response.</li>
