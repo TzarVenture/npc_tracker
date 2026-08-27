@@ -131,9 +131,29 @@ export default function Publishers() {
   const trackingUrl = `${window.location.origin}/track?offer_id=${selectedOfferId || "off-id"}&pub_id=${newPubId || "PUB-101"}&sub_id1={sub_id1}`;
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(trackingUrl);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(trackingUrl).catch(() => fallbackCopy(trackingUrl));
+    } else {
+      fallbackCopy(trackingUrl);
+    }
     setCopied(true);
+    showToast("success", "Copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const fallbackCopy = (text: string) => {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-999999px";
+      textarea.style.top = "-999999px";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    } catch (err) {}
   };
 
   const totalClicks = publishers.reduce((s, p) => s + p.clickCount, 0);

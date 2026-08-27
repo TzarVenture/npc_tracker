@@ -349,9 +349,29 @@ export default function Offers() {
   };
 
   const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    } else {
+      fallbackCopy(text);
+    }
     setCopiedId(id);
+    showToast("success", "Copied to Clipboard!", "Integration code copied.");
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const fallbackCopy = (text: string) => {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-999999px";
+      textarea.style.top = "-999999px";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    } catch (err) {}
   };
 
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));

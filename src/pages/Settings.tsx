@@ -35,8 +35,27 @@ interface DbStats {
 function CodeSnippet({ code, label }: { code: string; label?: string }) {
   const { showToast } = useToast();
   const copy = () => {
-    navigator.clipboard.writeText(code);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(code).catch(() => fallbackCopy(code));
+    } else {
+      fallbackCopy(code);
+    }
     showToast("success", "Copied to clipboard!");
+  };
+
+  const fallbackCopy = (text: string) => {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-999999px";
+      textarea.style.top = "-999999px";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    } catch (err) {}
   };
   return (
     <div className="space-y-1">
