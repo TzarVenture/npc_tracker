@@ -218,7 +218,7 @@ export default function Filters() {
                     Master Tracking State Control
                   </CardTitle>
                   <CardDescription>
-                    Control the master tracking engine status stored directly in the SQLite database configuration layer.
+                    Control the master tracking engine status for all incoming campaign traffic.
                   </CardDescription>
                 </div>
               </CardHeader>

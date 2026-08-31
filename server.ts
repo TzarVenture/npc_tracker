@@ -1209,7 +1209,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n  ➜  NPC Tracker Server running at: http://localhost:${PORT}/\n`);
+    console.log(`\n  ➜  ClicksTracker Server running at: http://localhost:${PORT}/\n`);
   });
 }
 

@@ -104,10 +104,8 @@ export default function App() {
         {/* Brand Header */}
         <div className="p-6 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-slate-950 rounded-lg flex items-center justify-center shadow-sm">
-              <span className="text-white text-xs font-black font-mono">NT</span>
-            </div>
-            <span className="font-bold text-lg tracking-tight text-slate-900">NPC_tracker</span>
+            <img src="/favicon.png" className="w-8 h-8 rounded-lg object-contain shadow-sm" alt="ClicksTracker Logo" />
+            <span className="font-bold text-lg tracking-tight text-slate-900">ClicksTracker</span>
           </div>
           <button
             onClick={() => setMobileMenuOpen(false)}
@@ -190,10 +188,9 @@ export default function App() {
             </h1>
           </div>
 
-          <div className="flex items-center gap-4">
-            <Badge variant="primary" className="bg-indigo-50 border-indigo-100 text-indigo-700 font-mono">
-              SQLite Node v3.0
-            </Badge>
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="font-semibold text-slate-700">System Active</span>
           </div>
         </header>
 

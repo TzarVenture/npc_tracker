@@ -456,7 +456,7 @@ export default function Settings() {
                 <CardTitle className="flex items-center gap-2">
                   <Database size={18} className="text-indigo-600" /> Database Statistics
                 </CardTitle>
-                <CardDescription>Live SQLite WAL mode metrics.</CardDescription>
+                <CardDescription>Live database performance metrics.</CardDescription>
               </div>
             </CardHeader>
             <CardContent>
@@ -479,7 +479,7 @@ export default function Settings() {
                   ))}
                   <div className="flex items-center gap-2 text-[10px] text-emerald-600 font-semibold pt-1">
                     <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                    SQLite WAL Mode — Online
+                    High-Speed Storage Engine — Healthy
                   </div>
                 </div>
               ) : (

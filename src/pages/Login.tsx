@@ -1,7 +1,7 @@
 /* Login.tsx: Enterprise Fluent UI admin authentication view. */
 import React, { useState } from "react";
 import axios from "axios";
-import { Lock, User as UserIcon, ShieldCheck, AlertCircle, ArrowRight } from "lucide-react";
+import { Lock, User as UserIcon, ShieldCheck, AlertCircle, ArrowRight, Eye, EyeOff } from "lucide-react";
 
 interface LoginProps {
   onLoginSuccess: (token: string, user: any) => void;
@@ -10,6 +10,7 @@ interface LoginProps {
 export default function Login({ onLoginSuccess }: LoginProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -53,14 +54,12 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       <div className="w-full max-w-md space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-slate-900 text-white font-mono font-bold text-base shadow-sm border border-slate-800">
-            NT
-          </div>
+          <img src="/favicon.png" className="inline-block w-14 h-14 rounded-2xl object-contain shadow-lg" alt="ClicksTracker Logo" />
           <div>
-            <h1 className="text-xl font-bold tracking-tight text-white">
-              NPC_tracker Admin
+            <h1 className="text-2xl font-bold tracking-tight text-white">
+              ClicksTracker
             </h1>
-            <p className="text-xs text-slate-400 mt-0.5">Enterprise Operations & Traffic Control Gateway</p>
+            <p className="text-xs text-slate-400 mt-0.5">Enterprise Traffic &amp; Affiliate Control Gateway</p>
           </div>
         </div>
 
@@ -100,12 +99,20 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all font-medium"
+                  className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder:text-slate-400 outline-none focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10 transition-all font-medium"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md transition-colors"
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
             </div>
 
@@ -121,12 +128,6 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               )}
             </button>
           </form>
-        </div>
-
-        {/* Footer info */}
-        <div className="text-center text-[11px] font-medium text-slate-400 flex items-center justify-center gap-1.5">
-          <ShieldCheck size={14} className="text-emerald-500" />
-          <span>Protected by AES-256 JWT Authentication</span>
         </div>
       </div>
     </div>
