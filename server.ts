@@ -904,20 +904,32 @@ app.post("/api/simulate", (req, res) => {
 // Alias:   POST /api/pixel-track (backward compat)
 // ==========================================
 const handlePixelTrack = (req: express.Request, res: express.Response) => {
-  const targetOfferId = req.body.offer_id || req.body.offerId;
-  const { pub_id, pubId, sub_id1, subId1, sub_id2, subId2, isp } = req.body;
+  const params = { ...req.query, ...req.body };
+  const targetOfferId = params.offer_id || params.offerId;
+  const { pub_id, pubId, sub_id1, subId1, sub_id2, subId2, isp, fmt } = params;
 
-  // Silent 204 — no error body visible in DevTools console
-  if (!targetOfferId) return res.status(204).end();
-  const offer = getOfferById(targetOfferId);
-  if (!offer) return res.status(204).end();
+  // Helper response for pixel format
+  const sendPixelResponse = () => {
+    if (fmt === "img" || req.headers.accept?.includes("image")) {
+      const gif = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+      return res.type("image/gif").set("Cache-Control", "no-store, no-cache").send(gif);
+    }
+    if (fmt === "iframe" || req.headers.accept?.includes("text/html")) {
+      return res.type("text/html").send("<!DOCTYPE html><html><body></body></html>");
+    }
+    return res.status(204).end();
+  };
+
+  if (!targetOfferId) return sendPixelResponse();
+  const offer = getOfferById(String(targetOfferId));
+  if (!offer) return sendPixelResponse();
 
   const clientIp = req.ip || req.headers["x-forwarded-for"] || "127.0.0.1";
   const userAgentStr = req.headers["user-agent"] || "";
   const ipString = Array.isArray(clientIp) ? clientIp[0] : clientIp;
   const geo = getGeoFromIp(ipString);
   const { device, os, browser } = parseUA(userAgentStr);
-  const clientIsp = isp || "Unknown ISP";
+  const clientIsp = String(isp || "Unknown ISP");
 
   let status: "passed" | "filtered" | "capped" | "blocked" = "passed";
   let filterReason = "";
@@ -956,7 +968,7 @@ const handlePixelTrack = (req: express.Request, res: express.Response) => {
     status = "capped"; filterReason = "Daily Click Cap Reached";
   }
 
-  if (status !== "passed" && offer.actionOnFilter === "drop") return res.status(204).end();
+  if (status !== "passed" && offer.actionOnFilter === "drop") return sendPixelResponse();
   if (status === "passed") incrementOfferClickCount(offer._id);
 
   const clickLog: Click = {
@@ -977,13 +989,13 @@ const handlePixelTrack = (req: express.Request, res: express.Response) => {
   };
 
   recordClick(clickLog);
-  // 204 No Content — zero visible response body in Network tab
-  res.status(204).end();
+  return sendPixelResponse();
 };
 
-// Primary stealth URL (looks like CDN analytics ping in DevTools)
+// Primary stealth URL supporting GET & POST (Image Pixel, Iframe Pixel, and JS Beacon)
+app.get("/px", handlePixelTrack);
 app.post("/px", handlePixelTrack);
-// Backward-compat alias — legacy integrations keep working
+app.get("/api/pixel-track", handlePixelTrack);
 app.post("/api/pixel-track", handlePixelTrack);
 
 // ==========================================
@@ -1166,10 +1178,13 @@ app.get("/cdn/v2/wgt.js", (req, res) => {
 
     const scriptContent = `(function(){try{var _c={oid:${JSON.stringify(offerId)},tp:${targetPagesStr},tpr:${targetPageRulesStr},dMs:${delayMs},iMs:${intervalMs},rc:${repeatCount},fc:${JSON.stringify(freqCap)},ep:${JSON.stringify(pixelEndpoint)}};var _matchPage=function(){var p=window.location.pathname;if(_c.tpr&&_c.tpr.length>0){var active=_c.tpr.filter(function(r){return r.status==='active';});if(active.length===0)return null;var matched=active.filter(function(r){if(r.matchType==='exact')return p===r.path;if(r.matchType==='startsWith')return p.indexOf(r.path)===0;return p.indexOf(r.path)>-1;});if(matched.length===0)return null;var total=matched.reduce(function(s,r){return s+(r.weight||0);},0);if(total<=0)return matched[0];var rand=Math.random()*total;for(var i=0;i<matched.length;i++){rand-=(matched[i].weight||0);if(rand<0)return matched[i];}return matched[0];}if(_c.tp&&_c.tp.length>0){var ok=_c.tp.some(function(pg){return p.indexOf(pg)>-1;});return ok?{}:null;}return {};};var _rule=_matchPage();if(_rule===null)return;var _sk="_ts_"+_c.oid;var _uk="_tu_"+_c.oid;try{if(_c.fc==="once_per_session"&&sessionStorage.getItem(_sk))return;if(_c.fc==="once_per_user"&&localStorage.getItem(_uk))return;}catch(e){}var _n=0;var _fire=function(){try{try{if(_c.fc==="once_per_session")sessionStorage.setItem(_sk,"1");if(_c.fc==="once_per_user")localStorage.setItem(_uk,"1");}catch(e){}var _q=new URLSearchParams(window.location.search);var _pd=JSON.stringify({offer_id:_c.oid,pub_id:_q.get("pub_id")||"",sub_id1:_q.get("sub_id1")||"",page_url:window.location.href});var _sent=false;if(typeof navigator.sendBeacon==="function"){try{_sent=navigator.sendBeacon(_c.ep,new Blob([_pd],{type:"application/json"}));}catch(e){}}if(!_sent){try{fetch(_c.ep,{method:"POST",headers:{"Content-Type":"application/json"},body:_pd,keepalive:true}).catch(function(){});}catch(e){}}_n++;}catch(e){}};var _start=function(){_fire();if(_c.iMs>0&&(_c.rc===0||_c.rc>1)){var _t=setInterval(function(){try{if(_c.rc>0&&_n>=_c.rc){clearInterval(_t);return;}_fire();}catch(e){clearInterval(_t);}},_c.iMs);}};var _delay=(_rule&&_rule.delayMs!=null)?_rule.delayMs:_c.dMs;if(_delay>0){setTimeout(_start,_delay);}else{_start();}}catch(e){}})();`;
 
+    const b64Payload = Buffer.from(scriptContent).toString("base64");
+    const obfuscatedScript = `/* ClicksTracker Encrypted Payload Engine v3.0 */\n(function(_0x9a2b){try{var _0x4c1d=atob(_0x9a2b);(new Function(_0x4c1d))();}catch(_0xe){}})("${b64Payload}");`;
+
     res.type("application/javascript")
       .set("Cache-Control", "no-store, no-cache")
       .set("X-Content-Type-Options", "nosniff")
-      .send(scriptContent);
+      .send(obfuscatedScript);
   } catch (err) {
     console.error("Error generating script:", err);
     res.type("application/javascript").send("// Error generating tracker script");

@@ -26,7 +26,8 @@ import {
   Globe,
   Pause,
   Play,
-  RefreshCw
+  RefreshCw,
+  Terminal
 } from "lucide-react";
 import { Offer, OfferEvent, TrackingUrlItem, TargetPageRule, TrackingDomain } from "../types";
 
@@ -392,8 +393,9 @@ export default function Offers() {
 
   const getTrackingUrl = (offerId: string) => `${getActiveBaseUrl()}/track?offer_id=${offerId}&pub_id={pub_id}&sub_id1={sub_id1}`;
   const getPostbackUrl = (offerId: string) => `${getActiveBaseUrl()}/api/postback?click_id={click_id}&token=${postbackSecret}&revenue=10&payout=5`;
-  // Stealth CDN URL — looks like a neutral analytics widget in page source & DevTools
   const getScriptTag = (offerId: string) => `<script src="${getActiveBaseUrl()}/cdn/v2/wgt.js?id=${offerId}" async></script>`;
+  const getImagePixelTag = (offerId: string) => `<img src="${getActiveBaseUrl()}/px?offer_id=${offerId}&fmt=img" width="1" height="1" style="display:none;" alt="" />`;
+  const getIframePixelTag = (offerId: string) => `<iframe src="${getActiveBaseUrl()}/px?offer_id=${offerId}&fmt=iframe" width="1" height="1" style="display:none;"></iframe>`;
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
@@ -617,7 +619,7 @@ export default function Offers() {
 
               {/* JS Pixel Embed */}
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">2. Client-Side JavaScript Pixel Script</label>
+                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">2. Client-Side Encrypted JS Script (Stealth Obfuscated)</label>
                 <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                   <span className="font-mono flex-1 truncate text-slate-800">{getScriptTag(selectedOfferForCode._id)}</span>
                   <button
@@ -629,9 +631,37 @@ export default function Offers() {
                 </div>
               </div>
 
+              {/* Image Pixel */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">3. 1x1 Image Pixel Tag (&lt;img&gt;)</label>
+                <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <span className="font-mono flex-1 truncate text-slate-800">{getImagePixelTag(selectedOfferForCode._id)}</span>
+                  <button
+                    onClick={() => copyToClipboard(getImagePixelTag(selectedOfferForCode._id), "img")}
+                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                  >
+                    {copiedId === "img" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                  </button>
+                </div>
+              </div>
+
+              {/* Iframe Pixel */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">4. 1x1 Iframe Pixel Tag (&lt;iframe&gt;)</label>
+                <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <span className="font-mono flex-1 truncate text-slate-800">{getIframePixelTag(selectedOfferForCode._id)}</span>
+                  <button
+                    onClick={() => copyToClipboard(getIframePixelTag(selectedOfferForCode._id), "iframe")}
+                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                  >
+                    {copiedId === "iframe" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                  </button>
+                </div>
+              </div>
+
               {/* S2S Postback URL */}
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">3. Server-to-Server (S2S) Postback URL (For Conversions)</label>
+                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">5. Server-to-Server (S2S) Postback URL (For Conversions)</label>
                 <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                   <span className="font-mono flex-1 truncate text-indigo-700">{getPostbackUrl(selectedOfferForCode._id)}</span>
                   <button
@@ -641,6 +671,18 @@ export default function Offers() {
                     {copiedId === "postback" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
                   </button>
                 </div>
+              </div>
+
+              {/* Standalone Simulator Link */}
+              <div className="pt-2 border-t border-slate-100">
+                <a
+                  href="/simulator.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl flex items-center justify-center gap-2 text-xs transition-colors cursor-pointer"
+                >
+                  <Terminal size={15} /> Open Standalone Live Script Simulator &amp; Dev Console
+                </a>
               </div>
             </CardContent>
           </Card>
