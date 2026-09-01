@@ -26,8 +26,7 @@ import {
   Globe,
   Pause,
   Play,
-  RefreshCw,
-  Terminal
+  RefreshCw
 } from "lucide-react";
 import { Offer, OfferEvent, TrackingUrlItem, TargetPageRule, TrackingDomain } from "../types";
 
@@ -671,18 +670,6 @@ export default function Offers() {
                     {copiedId === "postback" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
                   </button>
                 </div>
-              </div>
-
-              {/* Standalone Simulator Link */}
-              <div className="pt-2 border-t border-slate-100">
-                <a
-                  href="/simulator.html"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full py-2.5 px-4 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl flex items-center justify-center gap-2 text-xs transition-colors cursor-pointer"
-                >
-                  <Terminal size={15} /> Open Standalone Live Script Simulator &amp; Dev Console
-                </a>
               </div>
             </CardContent>
           </Card>

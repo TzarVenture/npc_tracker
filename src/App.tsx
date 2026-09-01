@@ -12,8 +12,7 @@ import {
   Menu,
   X,
   LogOut,
-  ShieldCheck,
-  Terminal
+  ShieldCheck
 } from "lucide-react";
 import Dashboard from "./pages/Dashboard";
 import Offers from "./pages/Offers";
@@ -189,20 +188,9 @@ export default function App() {
             </h1>
           </div>
 
-          <div className="flex items-center gap-3">
-            <a
-              href="/simulator.html"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors cursor-pointer"
-            >
-              <Terminal size={14} className="text-indigo-600" />
-              Live Script Simulator
-            </a>
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="font-semibold text-slate-700">System Active</span>
-            </div>
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-3 py-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="font-semibold text-slate-700">System Active</span>
           </div>
         </header>
 
