@@ -106,22 +106,26 @@
   <script>
     document.getElementById("simulateSaleBtn").addEventListener("click", async function() {
       const logBox = document.getElementById("logConsole");
-      logBox.innerHTML += "<br>[Status] Fetching latest passed click_id from server...";
+      logBox.innerHTML += "<br>[Status] Fetching system config & latest passed click_id from server...";
 
       try {
-        const clickRes = await fetch("/api/clicks?status=passed&limit=1");
-        const clickData = await clickRes.json();
-        
-        if (!clickData.data || clickData.data.length === 0) {
-          logBox.innerHTML += "<br>[Error] No clean clicks found! Click a tracking link first.";
+        const [configRes, clickRes] = await Promise.all([
+          fetch("/api/system-config").then(r => r.json()).catch(() => ({ postbackSecret: "npc_postback_sec_2026" })),
+          fetch("/api/clicks?status=passed&limit=1").then(r => r.json())
+        ]);
+
+        const token = (configRes && configRes.postbackSecret) ? configRes.postbackSecret : "npc_postback_sec_2026";
+
+        if (!clickRes.data || clickRes.data.length === 0) {
+          logBox.innerHTML += "<br>[Notice] No clean passed clicks found in database. Run a simulator click or open a campaign link first!";
           return;
         }
 
-        const clickId = clickData.data[0]._id;
+        const clickId = clickRes.data[0]._id;
         logBox.innerHTML += "<br>[Success] Found active Click ID: " + clickId;
         logBox.innerHTML += "<br>[Action] Firing S2S Sale Postback (&event=sale&revenue=1500&payout=300)...";
 
-        const postbackUrl = "/api/postback?click_id=" + clickId + "&token=npc_postback_sec_2026&event=sale&revenue=1500&payout=300";
+        const postbackUrl = "/api/postback?click_id=" + encodeURIComponent(clickId) + "&token=" + encodeURIComponent(token) + "&event=sale&revenue=1500&payout=300";
         const pbRes = await fetch(postbackUrl);
         const pbData = await pbRes.json();
 
