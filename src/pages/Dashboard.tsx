@@ -22,6 +22,7 @@ import { useToast } from "../components/ui/Toast";
 import {
   MousePointerClick,
   ShieldAlert,
+  ShieldCheck,
   IndianRupee,
   Activity,
   Play,
@@ -792,6 +793,44 @@ export default function Dashboard() {
                         {simResult.finalDest === "BLOCK_ACCESS_DENIED" ? "HTTP 403 Access Denied" : `302 Redirect to -> ${simResult.finalDest}`}
                       </div>
                     </div>
+
+                    {/* Referrer Privacy & Redirection Audit */}
+                    {simResult.referrerAudit && (
+                      <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-indigo-400 font-bold uppercase text-[11px] flex items-center gap-1.5">
+                            <ShieldCheck size={14} className="text-emerald-400" />
+                            Referrer Security & Privacy Audit:
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            simResult.referrerAudit.isHidden
+                              ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
+                              : "bg-indigo-950 text-indigo-300 border border-indigo-800"
+                          }`}>
+                            {simResult.referrerAudit.isHidden ? "100% BLANK / HIDDEN" : "BRAND SPOOFED"}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 text-[11px]">
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Method Configured:</span>
+                            <span className="text-slate-200 font-medium">{simResult.referrerAudit.redirectDescription}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Header Dispatched:</span>
+                            <span className="text-amber-300 font-mono text-[10px]">{simResult.referrerAudit.referrerPolicyHeader}</span>
+                          </div>
+                          <div className="flex justify-between items-center pt-1.5 border-t border-slate-900">
+                            <span className="text-slate-400 font-semibold">Advertiser Sees (Referer):</span>
+                            <span className={`font-mono font-bold ${
+                              simResult.referrerAudit.isHidden ? "text-emerald-400" : "text-indigo-300"
+                            }`}>
+                              {simResult.referrerAudit.advertiserReferrerSeen}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* S2S Postback Simulation Action */}
                     {simResult.outcome === "passed" && (

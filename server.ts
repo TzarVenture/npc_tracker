@@ -572,6 +572,7 @@ app.delete("/api/publishers/:id", authMiddleware, (req, res) => {
 // Clear all test click & conversion telemetry data
 app.post("/api/telemetry/reset", authMiddleware, (req, res) => {
   clearAllTelemetryData();
+  resetRotationState();
   res.json({ success: true, message: "All test clicks and conversions have been cleared." });
 });
 
@@ -647,8 +648,24 @@ app.get("/api/stats/performance", (req, res) => {
   res.json(getHourlyPerformance());
 });
 
-// Helper to pick destination URL from offer trackingUrls by weight & targeting
-const selectDestinationUrl = (offer: Offer, geo: string, device: string): string => {
+// ==========================================
+// DETERMINISTIC SMOOTH WEIGHTED ROUND-ROBIN (SWRR) ROTATION ENGINE
+// Eliminates random jitter and guarantees balanced traffic distribution.
+// For equal splits (e.g. 20/20/20/20 or 25/25/25/25), all links receive equal clicks (max 1 click variance).
+// ==========================================
+interface SwrrNodeState {
+  currentWeight: number;
+}
+
+// In-memory state tracking per campaign offer ID: Map<offerId, Map<urlKey, SwrrNodeState>>
+const offerRotationState = new Map<string, Map<string, SwrrNodeState>>();
+
+export const resetRotationState = () => {
+  offerRotationState.clear();
+};
+
+// Helper to pick destination URL from offer trackingUrls by weight & targeting using SWRR
+export const selectDestinationUrl = (offer: Offer, geo: string, device: string): string => {
   if (offer.trackingUrls && offer.trackingUrls.length > 0) {
     const activeUrls = offer.trackingUrls.filter(u => {
       if (u.status !== "active") return false;
@@ -658,22 +675,65 @@ const selectDestinationUrl = (offer: Offer, geo: string, device: string): string
     });
 
     if (activeUrls.length > 0) {
-      const totalWeight = activeUrls.reduce((sum, u) => sum + (Number(u.weight) || 0), 0);
-      if (totalWeight > 0) {
-        let random = Math.random() * totalWeight;
-        for (const item of activeUrls) {
-          const w = Number(item.weight) || 0;
-          if (random < w) {
-            return item.url;
-          }
-          random -= w;
+      if (activeUrls.length === 1) {
+        return activeUrls[0].url;
+      }
+
+      // Retrieve or initialize the state map for this offer
+      let offerState = offerRotationState.get(offer._id);
+      if (!offerState) {
+        offerState = new Map<string, SwrrNodeState>();
+        offerRotationState.set(offer._id, offerState);
+      }
+
+      // Cleanup keys that are no longer active
+      const activeKeys = new Set(activeUrls.map(u => u.id || u.url));
+      for (const k of offerState.keys()) {
+        if (!activeKeys.has(k)) {
+          offerState.delete(k);
         }
       }
-      return activeUrls[0].url;
+
+      // Ensure every active URL has a state entry
+      for (const item of activeUrls) {
+        const key = item.id || item.url;
+        if (!offerState.has(key)) {
+          offerState.set(key, { currentWeight: 0 });
+        }
+      }
+
+      const totalWeight = activeUrls.reduce((sum, u) => sum + Math.max(1, Number(u.weight) || 1), 0);
+
+      // Smooth Weighted Round-Robin (Nginx Algorithm):
+      // 1. For each eligible URL: currentWeight += effectiveWeight
+      // 2. Select the URL with the maximum currentWeight
+      // 3. Deduct totalWeight from the selected URL's currentWeight
+      let bestItem = activeUrls[0];
+      let maxCurrentWeight = -Infinity;
+
+      for (const item of activeUrls) {
+        const key = item.id || item.url;
+        const state = offerState.get(key)!;
+        const effectiveWeight = Math.max(1, Number(item.weight) || 1);
+
+        state.currentWeight += effectiveWeight;
+
+        if (state.currentWeight > maxCurrentWeight) {
+          maxCurrentWeight = state.currentWeight;
+          bestItem = item;
+        }
+      }
+
+      const bestKey = bestItem.id || bestItem.url;
+      const bestState = offerState.get(bestKey)!;
+      bestState.currentWeight -= totalWeight;
+
+      return bestItem.url;
     }
   }
   return offer.destinationUrl;
 };
+
 
 // Redirect Execution Engine supporting 302, 307, Meta, Double Meta, and Custom Referrer Hiding
 const executeRedirect = (res: express.Response, offer: Offer, finalDest: string) => {
@@ -886,6 +946,38 @@ app.post("/api/simulate", (req, res) => {
 
   recordClick(newClick);
 
+  const redirectType = offer.redirectType || "302";
+  let referrerPolicyHeader = "Referrer-Policy: no-referrer";
+  let advertiserReferrerSeen = "[BLANK] (100% Origin Hidden)";
+  let redirectDescription = "Standard HTTP 302 Redirect";
+
+  if (redirectType === "307") {
+    redirectDescription = "Strict HTTP 307 Temporary Redirect";
+    referrerPolicyHeader = "Referrer-Policy: no-referrer";
+    advertiserReferrerSeen = "[BLANK] (100% Origin Hidden)";
+  } else if (redirectType === "meta") {
+    redirectDescription = "HTML Meta Refresh (Referrer-Policy Meta Tag)";
+    referrerPolicyHeader = "<meta name=\"referrer\" content=\"no-referrer\">";
+    advertiserReferrerSeen = "[BLANK] (100% Origin Hidden)";
+  } else if (redirectType === "double_meta") {
+    redirectDescription = "Double Meta Anonymous Refresh (Single-Page Flashless)";
+    referrerPolicyHeader = "meta referrer: no-referrer + JS location.replace";
+    advertiserReferrerSeen = "[BLANK] (100% Origin Hidden)";
+  } else if (redirectType === "custom_referrer") {
+    const customRef = offer.customReferrerUrl || "https://google.com";
+    redirectDescription = "Custom Branded Referrer Spoofing";
+    referrerPolicyHeader = "history.replaceState() Spoofing Engine";
+    advertiserReferrerSeen = `${customRef} [SPOOFED]`;
+  }
+
+  const referrerAudit = {
+    redirectType,
+    redirectDescription,
+    referrerPolicyHeader,
+    advertiserReferrerSeen,
+    isHidden: redirectType !== "custom_referrer"
+  };
+
   res.json({
     success: true,
     outcome: status,
@@ -894,6 +986,7 @@ app.post("/api/simulate", (req, res) => {
     fallbackDest: offer.fallbackUrl,
     finalDest: finalUrl,
     actionTaken: offer.actionOnFilter,
+    referrerAudit,
     click: newClick
   });
 });

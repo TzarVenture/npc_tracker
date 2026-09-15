@@ -309,6 +309,41 @@ export default function Offers() {
     }));
   };
 
+  const handleUpdateTrackingUrlWeight = (id: string, newWeight: number) => {
+    const safeWeight = Math.max(1, Math.min(100, Math.round(newWeight) || 1));
+    setFormData(prev => ({
+      ...prev,
+      trackingUrls: prev.trackingUrls.map(u => u.id === id ? { ...u, weight: safeWeight } : u)
+    }));
+  };
+
+  const handleStepTrackingUrlWeight = (id: string, delta: number) => {
+    setFormData(prev => ({
+      ...prev,
+      trackingUrls: prev.trackingUrls.map(u => {
+        if (u.id !== id) return u;
+        const current = Number(u.weight) || 0;
+        const next = Math.max(1, Math.min(100, current + delta));
+        return { ...u, weight: next };
+      })
+    }));
+  };
+
+  const handleEqualizeTrackingUrls = () => {
+    if (formData.trackingUrls.length === 0) return;
+    const count = formData.trackingUrls.length;
+    const baseShare = Math.floor(100 / count);
+    const remainder = 100 - (baseShare * count);
+    setFormData(prev => ({
+      ...prev,
+      trackingUrls: prev.trackingUrls.map((u, i) => ({
+        ...u,
+        weight: baseShare + (i < remainder ? 1 : 0)
+      }))
+    }));
+    showToast("success", "Weights balanced", `All ${count} rotation links set to equal percentage splits.`);
+  };
+
   const closeDrawer = () => {
     setShowDrawer(false);
     setEditingOfferId(null);
@@ -854,27 +889,89 @@ export default function Offers() {
                     </div>
 
                     {formData.trackingUrls.length > 0 ? (
-                      <div className="space-y-2 border border-slate-200 rounded-xl overflow-hidden text-xs">
-                        {formData.trackingUrls.map((item) => (
-                          <div key={item.id} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100">
-                            <div className="min-w-0 flex-1 pr-2">
-                              <div className="font-bold text-slate-900 flex items-center gap-2">
-                                {item.name}
-                                <Badge variant="primary" className="bg-indigo-50 text-indigo-700 text-[10px]">
-                                  Weight: {item.weight}%
-                                </Badge>
-                              </div>
-                              <div className="text-slate-500 font-mono truncate text-[11px] mt-0.5">{item.url}</div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveTrackingUrl(item.id)}
-                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0 cursor-pointer"
-                            >
-                              <Trash2 size={15} />
-                            </button>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between px-1">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="font-semibold text-slate-700">Total Configured Weight:</span>
+                            {(() => {
+                              const totalWeight = formData.trackingUrls.reduce((sum, u) => sum + (Number(u.weight) || 0), 0);
+                              return (
+                                <>
+                                  <Badge 
+                                    variant={totalWeight === 100 ? "success" : "warning"}
+                                    className={totalWeight === 100 ? "bg-emerald-50 text-emerald-700 border-emerald-200 font-bold" : "bg-amber-50 text-amber-700 border-amber-200 font-bold"}
+                                  >
+                                    {totalWeight}%
+                                  </Badge>
+                                  {totalWeight !== 100 && (
+                                    <span className="text-[11px] text-amber-600 hidden sm:inline">(Auto-normalizes proportionally)</span>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
-                        ))}
+                          <button
+                            type="button"
+                            onClick={handleEqualizeTrackingUrls}
+                            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 border border-indigo-200"
+                            title="Split 100% equally among all rotation links"
+                          >
+                            <Shuffle size={12} /> Auto-Split Equally
+                          </button>
+                        </div>
+
+                        <div className="space-y-2 border border-slate-200 rounded-xl overflow-hidden text-xs">
+                          {formData.trackingUrls.map((item) => (
+                            <div key={item.id} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100 gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="font-bold text-slate-900">{item.name}</div>
+                                <div className="text-slate-500 font-mono truncate text-[11px] mt-0.5">{item.url}</div>
+                              </div>
+
+                              {/* Interactive Weight Stepper (+ / -) & Input */}
+                              <div className="flex items-center gap-2 shrink-0">
+                                <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-0.5 shadow-xs">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStepTrackingUrlWeight(item.id, -5)}
+                                    className="w-6 h-6 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-white rounded transition-colors font-bold text-sm cursor-pointer"
+                                    title="Decrease 5%"
+                                  >
+                                    –
+                                  </button>
+                                  <div className="relative flex items-center px-1">
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="100"
+                                      value={item.weight}
+                                      onChange={(e) => handleUpdateTrackingUrlWeight(item.id, Number(e.target.value))}
+                                      className="w-10 text-center font-bold text-xs text-indigo-700 bg-transparent focus:outline-none focus:bg-white rounded py-0.5"
+                                    />
+                                    <span className="text-[10px] text-slate-400 font-bold">%</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStepTrackingUrlWeight(item.id, 5)}
+                                    className="w-6 h-6 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-white rounded transition-colors font-bold text-sm cursor-pointer"
+                                    title="Increase 5%"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveTrackingUrl(item.id)}
+                                  className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0 cursor-pointer transition-colors"
+                                  title="Delete Link"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ) : (
                       <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
