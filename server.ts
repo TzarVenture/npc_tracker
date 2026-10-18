@@ -96,6 +96,19 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Helper to escape special HTML characters inside JSON stringified variables in <script> blocks
+// Prevents Reflected and Stored Cross-Site Scripting (XSS) via closing script tags (e.g. </script>)
+const safeJsonStringify = (data: any): string => {
+  return JSON.stringify(data).replace(/[<>\/]/g, (char) => {
+    switch (char) {
+      case "<": return "\\u003c";
+      case ">": return "\\u003e";
+      case "/": return "\\u002f";
+      default: return char;
+    }
+  });
+};
+
 // Helper to determine visitor attributes from user-agent
 const parseUA = (ua: string) => {
   const lower = (ua || "").toLowerCase();
@@ -764,7 +777,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(targetUrl)});</script>
+  <script>window.location.replace(${safeJsonStringify(targetUrl)});</script>
 </body>
 </html>
     `);
@@ -783,7 +796,7 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
   <script>
     (function(){
       try { document.referrer; } catch(e) {}
-      window.location.replace(${JSON.stringify(targetUrl)});
+      window.location.replace(${safeJsonStringify(targetUrl)});
     })();
   </script>
 </body>
@@ -802,8 +815,8 @@ const executeRedirect = (res: express.Response, offer: Offer, finalDest: string)
 </head>
 <body>
   <script>
-    ${customRef ? `try { history.replaceState(null, "", "${customRef}"); } catch(e) {}` : ''}
-    window.location.replace(${JSON.stringify(targetUrl)});
+    ${customRef ? `try { history.replaceState(null, "", ${safeJsonStringify(customRef)}); } catch(e) {}` : ''}
+    window.location.replace(${safeJsonStringify(targetUrl)});
   </script>
 </body>
 </html>
@@ -820,6 +833,11 @@ app.get("/clean-redirect", (req, res) => {
   const dest = req.query.dest as string;
   if (!dest) return res.status(400).send("<h1>Error: Missing destination</h1>");
 
+  // Prevent Open Redirect and javascript:/data: protocol execution vectors
+  if (!/^https?:\/\//i.test(dest)) {
+    return res.status(400).send("<h1>Error: Invalid destination URL</h1>");
+  }
+
   res.type("html").send(`
 <!DOCTYPE html>
 <html>
@@ -830,7 +848,7 @@ app.get("/clean-redirect", (req, res) => {
   <title>Redirecting...</title>
 </head>
 <body>
-  <script>window.location.replace(${JSON.stringify(dest)});</script>
+  <script>window.location.replace(${safeJsonStringify(dest)});</script>
 </body>
 </html>
   `);
