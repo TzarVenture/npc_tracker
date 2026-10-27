@@ -1,4 +1,4 @@
-/* Reports.tsx: Real-time traffic log viewer, conversions ledger, date-range filtering, and full server-side CSV log exporter. */
+/* Reports.tsx: Traffic log viewer, conversions ledger, debounced search, and CSV exporter. */
 import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
@@ -6,6 +6,7 @@ import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Select } from "../components/ui/Input";
 import { useToast } from "../components/ui/Toast";
+import { copyToClipboard } from "../utils/clipboard";
 import {
   FileText,
   Search,
@@ -36,46 +37,52 @@ export default function Reports() {
 
   // Filters
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedOffer, setSelectedOffer] = useState("all");
   const [selectedStatus, setSelectedStatus] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const copyToClipboard = (text: string, id: string) => {
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
-    } else {
-      fallbackCopy(text);
+  // Debounce search input to avoid calling the backend on every keypress
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const handleCopy = async (text: string, id: string) => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedId(id);
+      showToast("success", "Copied to clipboard");
+      setTimeout(() => setCopiedId(null), 2000);
     }
-    setCopiedId(id);
-    showToast("success", "Copied to clipboard!");
-    setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const fallbackCopy = (text: string) => {
-    try {
-      const textarea = document.createElement("textarea");
-      textarea.value = text;
-      textarea.style.position = "fixed";
-      textarea.style.left = "-999999px";
-      textarea.style.top = "-999999px";
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-    } catch (err) {}
+  const toUtcParam = (dateStr: string, isEnd = false): string => {
+    if (!dateStr || !dateStr.trim()) return "";
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "";
+    if (isEnd && dateStr.length === 16) {
+      d.setSeconds(59, 999);
+    }
+    return d.toISOString();
   };
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const dateParams = startDate ? `&startDate=${encodeURIComponent(startDate)}` : "";
-      const dateEndParams = endDate ? `&endDate=${encodeURIComponent(endDate + ":59")}` : "";
+      const utcStart = toUtcParam(startDate, false);
+      const utcEnd = toUtcParam(endDate, true);
+      const dateParams = utcStart ? `&startDate=${encodeURIComponent(utcStart)}` : "";
+      const dateEndParams = utcEnd ? `&endDate=${encodeURIComponent(utcEnd)}` : "";
+
       if (activeTab === "clicks") {
         const [clicksRes, offersRes] = await Promise.all([
-          axios.get(`/api/clicks?page=${page}&limit=${limit}&offerId=${selectedOffer}&status=${selectedStatus}&search=${encodeURIComponent(search)}${dateParams}${dateEndParams}`),
+          axios.get(`/api/clicks?page=${page}&limit=${limit}&offerId=${selectedOffer}&status=${selectedStatus}&search=${encodeURIComponent(debouncedSearch)}${dateParams}${dateEndParams}`),
           axios.get("/api/offers")
         ]);
         setClicks(clicksRes.data.data);
@@ -95,7 +102,7 @@ export default function Reports() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, page, limit, selectedOffer, selectedStatus, search, startDate, endDate]);
+  }, [activeTab, page, limit, selectedOffer, selectedStatus, debouncedSearch, startDate, endDate]);
 
   useEffect(() => {
     fetchLogs();
@@ -106,24 +113,27 @@ export default function Reports() {
     return found ? found.name : "Unknown Campaign";
   };
 
-  // FULL SERVER-SIDE CSV EXPORT
+  // CSV EXPORT
   const exportFullCSV = async () => {
     try {
-      const dateParams = startDate ? `&startDate=${encodeURIComponent(startDate)}` : "";
-      const dateEndParams = endDate ? `&endDate=${encodeURIComponent(endDate + ":59")}` : "";
+      const utcStart = toUtcParam(startDate, false);
+      const utcEnd = toUtcParam(endDate, true);
+      const dateParams = utcStart ? `&startDate=${encodeURIComponent(utcStart)}` : "";
+      const dateEndParams = utcEnd ? `&endDate=${encodeURIComponent(utcEnd)}` : "";
+
       const response = await axios.get(
-        `/api/clicks/export?offerId=${selectedOffer}&status=${selectedStatus}&search=${encodeURIComponent(search)}${dateParams}${dateEndParams}`,
+        `/api/clicks/export?offerId=${selectedOffer}&status=${selectedStatus}&search=${encodeURIComponent(debouncedSearch)}${dateParams}${dateEndParams}`,
         { responseType: "blob" }
       );
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `npc_tracker_full_report_${new Date().toISOString().split("T")[0]}.csv`);
+      link.setAttribute("download", `clicks_report_${new Date().toISOString().split("T")[0]}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      showToast("success", "CSV export started!", "Check your downloads folder.");
+      showToast("success", "CSV export started", "Check your downloads folder.");
     } catch (err: any) {
       showToast("error", "CSV export failed", err?.response?.data?.error || "Please try again.");
     }
@@ -131,6 +141,7 @@ export default function Reports() {
 
   const handleClearFilters = () => {
     setSearch("");
+    setDebouncedSearch("");
     setSelectedOffer("all");
     setSelectedStatus("all");
     setStartDate("");
@@ -142,60 +153,70 @@ export default function Reports() {
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
-      {/* Header section */}
+      {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Reports & Telemetry</h2>
-          <p className="text-sm text-slate-500">Search, audit, and download raw click and conversion streams.</p>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Reports & Logs</h2>
+          <p className="text-sm text-slate-500">Inspect real-time click and conversion telemetry.</p>
         </div>
-        <Button variant="outline" onClick={exportFullCSV} className="gap-2 text-indigo-700 bg-indigo-50 border-indigo-100 hover:bg-indigo-100">
-          <Download size={16} /> Export Full Server CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          {activeTab === "clicks" && (
+            <Button
+              variant="outline"
+              onClick={exportFullCSV}
+              className="gap-2 bg-white text-slate-700 shadow-2xs"
+              aria-label="Export logs to CSV"
+            >
+              <Download size={15} /> Export CSV
+            </Button>
+          )}
+        </div>
       </header>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-slate-200">
+      <div className="flex border-b border-slate-200">
         <button
           onClick={() => { setActiveTab("clicks"); setPage(1); }}
-          className={`px-4 py-2.5 text-xs font-bold uppercase tracking-wider border-b-2 flex items-center gap-2 transition-colors cursor-pointer ${
-            activeTab === "clicks" ? "border-indigo-600 text-indigo-600" : "border-transparent text-slate-500 hover:text-slate-900"
+          className={`flex items-center gap-2 px-5 py-3 border-b-2 text-sm font-semibold transition-colors cursor-pointer ${
+            activeTab === "clicks"
+              ? "border-slate-900 text-slate-900"
+              : "border-transparent text-slate-500 hover:text-slate-800"
           }`}
         >
-          <MousePointerClick size={14} /> Click Stream Ledger
+          <MousePointerClick size={16} /> Click Logs
         </button>
         <button
           onClick={() => { setActiveTab("conversions"); setPage(1); }}
-          className={`px-4 py-2.5 text-xs font-bold uppercase tracking-wider border-b-2 flex items-center gap-2 transition-colors cursor-pointer ${
-            activeTab === "conversions" ? "border-indigo-600 text-indigo-600" : "border-transparent text-slate-500 hover:text-slate-900"
+          className={`flex items-center gap-2 px-5 py-3 border-b-2 text-sm font-semibold transition-colors cursor-pointer ${
+            activeTab === "conversions"
+              ? "border-slate-900 text-slate-900"
+              : "border-transparent text-slate-500 hover:text-slate-800"
           }`}
         >
-          <Zap size={14} /> Conversions Ledger
+          <Zap size={16} /> Conversions
         </button>
       </div>
 
-      {/* Filter Toolbar Card (Only for Clicks) */}
+      {/* Filters Bar */}
       {activeTab === "clicks" && (
-        <Card>
-          <CardContent className="p-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+        <Card className="p-4 shadow-2xs border-slate-200 bg-white">
+          <CardContent className="p-0 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
               <div className="relative">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Search Keywords</label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                  <input
-                    type="text"
-                    placeholder="IP, PubID, Country..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-9 pr-4 py-2 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all placeholder:text-slate-400"
-                  />
-                </div>
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={15} />
+                <input
+                  type="text"
+                  placeholder="Search IP, Pub ID, Sub ID..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9 pr-3.5 py-2 w-full bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 outline-none focus:bg-white focus:border-slate-800 transition-all placeholder:text-slate-400"
+                  aria-label="Search clicks"
+                />
               </div>
 
               <Select
-                label="Campaign filter"
                 value={selectedOffer}
-                onChange={(e) => setSelectedOffer(e.target.value)}
+                onChange={(e) => { setSelectedOffer(e.target.value); setPage(1); }}
                 options={[
                   { value: "all", label: "All Campaigns" },
                   ...offers.map((o) => ({ value: o._id, label: o.name }))
@@ -203,9 +224,8 @@ export default function Reports() {
               />
 
               <Select
-                label="Routing Status"
                 value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
+                onChange={(e) => { setSelectedStatus(e.target.value); setPage(1); }}
                 options={[
                   { value: "all", label: "All Statuses" },
                   { value: "passed", label: "Passed" },
@@ -215,37 +235,37 @@ export default function Reports() {
                 ]}
               />
 
-              <Button variant="outline" onClick={fetchLogs} className="gap-2 w-full text-slate-700 bg-white">
-                <ArrowUpDown size={14} /> Refresh Logs
+              <Button variant="outline" onClick={fetchLogs} className="gap-2 w-full text-slate-700 bg-white" aria-label="Refresh logs">
+                <ArrowUpDown size={14} /> Refresh
               </Button>
             </div>
 
             {/* Date Range Row */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end pt-1 border-t border-slate-100">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end pt-2 border-t border-slate-100">
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1.5">
-                  <Calendar size={10} /> From Date
+                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                  <Calendar size={13} className="text-slate-500" /> Start Date & Time
                 </label>
                 <input
                   type="datetime-local"
                   value={startDate}
                   onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all text-slate-700"
+                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:bg-white focus:border-slate-800 transition-all text-slate-800 font-medium"
                 />
               </div>
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1.5">
-                  <Calendar size={10} /> To Date
+                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                  <Calendar size={13} className="text-slate-500" /> End Date & Time
                 </label>
                 <input
                   type="datetime-local"
                   value={endDate}
                   onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:bg-white focus:border-indigo-500 transition-all text-slate-700"
+                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:bg-white focus:border-slate-800 transition-all text-slate-800 font-medium"
                 />
               </div>
               {(startDate || endDate || search || selectedOffer !== "all" || selectedStatus !== "all") && (
-                <Button variant="outline" onClick={handleClearFilters} className="text-slate-500 gap-1.5">
+                <Button variant="outline" onClick={handleClearFilters} className="text-slate-600 gap-1.5 h-[34px]">
                   Clear Filters
                 </Button>
               )}
@@ -255,32 +275,32 @@ export default function Reports() {
       )}
 
       {/* Reports Table Grid */}
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden border-slate-200 shadow-2xs">
         <div className="overflow-x-auto">
           {activeTab === "clicks" ? (
             <table className="w-full text-left border-collapse whitespace-nowrap">
-              <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-widest border-b border-slate-200/50">
+              <thead className="bg-slate-50 text-slate-500 text-xs font-medium border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-4">Click Identifier</th>
-                  <th className="px-6 py-4">Timestamp</th>
-                  <th className="px-6 py-4">Campaign Context</th>
-                  <th className="px-6 py-4">Client IP</th>
-                  <th className="px-6 py-4">Geo & Agent</th>
-                  <th className="px-6 py-4 text-center">Outcome</th>
-                  <th className="px-6 py-4 text-right">Revenue (₹)</th>
+                  <th className="px-6 py-3.5">Click ID</th>
+                  <th className="px-6 py-3.5">Timestamp</th>
+                  <th className="px-6 py-3.5">Campaign</th>
+                  <th className="px-6 py-3.5">Client IP</th>
+                  <th className="px-6 py-3.5">Location & Device</th>
+                  <th className="px-6 py-3.5 text-center">Status</th>
+                  <th className="px-6 py-3.5 text-right">Revenue (₹)</th>
                 </tr>
               </thead>
               <tbody className="text-sm divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-slate-500 font-medium animate-pulse">
-                      Fetching log records...
+                    <td colSpan={7} className="px-6 py-12 text-center text-slate-500 font-medium">
+                      Loading clicks...
                     </td>
                   </tr>
                 ) : clicks.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
-                      No matching click telemetry found in database.
+                    <td colSpan={7} className="px-6 py-12 text-center text-slate-500 font-medium text-sm">
+                      No matching clicks found.
                     </td>
                   </tr>
                 ) : (
@@ -295,49 +315,50 @@ export default function Reports() {
                     });
 
                     return (
-                      <tr key={c._id} className="hover:bg-slate-50/40 transition-colors">
-                        <td className="px-6 py-4 font-mono text-xs text-indigo-600 font-bold">
-                          <div className="flex items-center gap-2">
+                      <tr key={c._id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="px-6 py-3.5 font-mono text-xs text-slate-900 font-medium">
+                          <div className="flex items-center gap-1.5">
                             <span className="truncate w-24 select-all" title={c._id}>{c._id}</span>
                             <button
-                              onClick={() => copyToClipboard(c._id, c._id)}
-                              className="p-1 hover:bg-indigo-50 rounded text-indigo-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                              onClick={() => handleCopy(c._id, c._id)}
+                              className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
                               title="Copy Click ID"
+                              aria-label="Copy Click ID"
                             >
-                              {copiedId === c._id ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                              {copiedId === c._id ? <CheckCircle2 size={13} className="text-emerald-500" /> : <Copy size={13} />}
                             </button>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-slate-600 text-xs">
+                        <td className="px-6 py-3.5 text-slate-600 text-xs">
                           {formattedTime}
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="font-semibold text-slate-900">{getCampaignName(c.offerId)}</div>
-                          <div className="text-[10px] text-slate-500 font-mono mt-0.5">pub: {c.pubId || "direct"} | sub1: {c.subId1 || "none"}</div>
+                        <td className="px-6 py-3.5">
+                          <div className="font-medium text-slate-900">{getCampaignName(c.offerId)}</div>
+                          <div className="text-[11px] text-slate-500 font-mono mt-0.5">pub: {c.pubId || "direct"} | sub1: {c.subId1 || "none"}</div>
                         </td>
-                        <td className="px-6 py-4 font-mono text-xs text-slate-600">
+                        <td className="px-6 py-3.5 font-mono text-xs text-slate-600">
                           {c.ip}
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-6 py-3.5">
                           <div className="flex items-center gap-1.5">
                             <span className="font-semibold text-slate-900">{c.country}</span>
-                            <span className="text-[10px] bg-slate-100 px-1.5 py-0.2 rounded text-slate-500 font-medium">
+                            <span className="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 font-medium">
                               {c.device} ({c.os})
                             </span>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-center">
+                        <td className="px-6 py-3.5 text-center">
                           <Badge variant={c.status === "passed" ? "success" : c.status === "filtered" ? "warning" : c.status === "capped" ? "warning" : "danger"}>
                             {c.status}
                           </Badge>
                           {c.filterReason && (
-                            <div className="text-[9px] text-slate-400 font-medium mt-0.5 truncate max-w-[120px]" title={c.filterReason}>
+                            <div className="text-xs text-slate-500 mt-0.5 truncate max-w-[150px]" title={c.filterReason}>
                               {c.filterReason}
                             </div>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-right font-bold text-slate-900">
-                          ₹{c.status === "passed" ? c.revenue.toFixed(2) : "0.00"}
+                        <td className="px-6 py-3.5 text-right font-medium text-slate-900">
+                          ₹{(Number(c.revenue) || 0).toFixed(2)}
                         </td>
                       </tr>
                     );
@@ -347,77 +368,113 @@ export default function Reports() {
             </table>
           ) : (
             <table className="w-full text-left border-collapse whitespace-nowrap">
-              <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-widest border-b border-slate-200/50">
+              <thead className="bg-slate-50 text-slate-500 text-xs font-medium border-b border-slate-200">
                 <tr>
-                  <th className="px-6 py-4">Conversion ID</th>
-                  <th className="px-6 py-4">Click ID</th>
-                  <th className="px-6 py-4">Campaign Context</th>
-                  <th className="px-6 py-4">Event Tier</th>
-                  <th className="px-6 py-4">Timestamp</th>
-                  <th className="px-6 py-4 text-right">Revenue (₹)</th>
-                  <th className="px-6 py-4 text-right">Payout (₹)</th>
+                  <th className="px-6 py-3.5">Conversion ID</th>
+                  <th className="px-6 py-3.5">Click ID</th>
+                  <th className="px-6 py-3.5">Campaign</th>
+                  <th className="px-6 py-3.5">Event</th>
+                  <th className="px-6 py-3.5">Timestamp</th>
+                  <th className="px-6 py-3.5 text-right">Revenue (₹)</th>
+                  <th className="px-6 py-3.5 text-right">Payout (₹)</th>
                 </tr>
               </thead>
               <tbody className="text-sm divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-slate-500 font-medium animate-pulse">
-                      Fetching conversion records...
+                    <td colSpan={7} className="px-6 py-12 text-center text-slate-500 font-medium">
+                      Loading conversions...
                     </td>
                   </tr>
                 ) : conversions.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
-                      No conversions logged yet. Trigger S2S postbacks using /api/postback?click_id=...
+                    <td colSpan={7} className="px-6 py-12 text-center text-slate-500 font-medium text-sm">
+                      No conversions recorded yet.
                     </td>
                   </tr>
                 ) : (
-                  conversions.map((conv) => (
-                    <tr key={conv._id} className="hover:bg-slate-50/40 transition-colors">
-                      <td className="px-6 py-4 font-mono text-xs text-indigo-600 font-bold">{conv._id}</td>
-                      <td className="px-6 py-4 font-mono text-xs text-slate-600">{conv.clickId}</td>
-                      <td className="px-6 py-4 font-semibold text-slate-900">{getCampaignName(conv.offerId)}</td>
-                      <td className="px-6 py-4">
-                        <span className="bg-indigo-50 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded border border-indigo-100 uppercase">
-                          {conv.eventName || "default"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-slate-600 text-xs">{new Date(conv.timestamp).toLocaleString()}</td>
-                      <td className="px-6 py-4 text-right font-bold text-emerald-600">₹{conv.revenue.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-right font-bold text-slate-900">₹{conv.payout.toFixed(2)}</td>
-                    </tr>
-                  ))
+                  conversions.map((conv) => {
+                    const convTime = new Date(conv.timestamp);
+                    const formatted = convTime.toLocaleDateString([], {
+                      month: "short",
+                      day: "numeric"
+                    }) + " " + convTime.toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit"
+                    });
+
+                    return (
+                      <tr key={conv._id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="px-6 py-3.5 font-mono text-xs font-medium text-slate-900">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate w-24 select-all" title={conv._id}>{conv._id}</span>
+                            <button
+                              onClick={() => handleCopy(conv._id, conv._id)}
+                              className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                              title="Copy Conversion ID"
+                              aria-label="Copy Conversion ID"
+                            >
+                              {copiedId === conv._id ? <CheckCircle2 size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-6 py-3.5 font-mono text-xs text-slate-600 select-all">
+                          {conv.clickId}
+                        </td>
+                        <td className="px-6 py-3.5 font-medium text-slate-900">
+                          {getCampaignName(conv.offerId)}
+                        </td>
+                        <td className="px-6 py-3.5">
+                          <span className="px-2 py-0.5 rounded text-xs font-mono font-medium bg-slate-100 text-slate-700">
+                            {conv.eventName || "default"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-3.5 text-slate-600 text-xs">
+                          {formatted}
+                        </td>
+                        <td className="px-6 py-3.5 text-right font-semibold text-emerald-600">
+                          ₹{(conv.revenue || 0).toFixed(2)}
+                        </td>
+                        <td className="px-6 py-3.5 text-right font-medium text-slate-900">
+                          ₹{(conv.payout || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           )}
         </div>
 
-        {/* Pagination Footer */}
-        <div className="p-4 bg-slate-50 border-t border-slate-100/80 flex flex-col sm:flex-row justify-between items-center gap-4 px-6">
-          <span className="text-slate-500 text-xs font-semibold">
-            Showing records on page {page} (Total Records: {totalRecords})
-          </span>
+        {/* Pagination Bar */}
+        <div className="px-6 py-3.5 bg-slate-50/80 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
+          <div>
+            Showing <span className="font-semibold">{Math.min(totalRecords, (page - 1) * limit + 1)}</span> to{" "}
+            <span className="font-semibold">{Math.min(totalRecords, page * limit)}</span> of{" "}
+            <span className="font-semibold">{totalRecords}</span> entries
+          </div>
+
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="px-2"
+              className="p-1.5 border border-slate-200 rounded-lg hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              aria-label="Previous page"
             >
               <ChevronLeft size={16} />
-            </Button>
-            <span className="text-xs font-medium text-slate-600 px-2">Page {page} of {totalPages}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-2"
+            </button>
+            <span className="font-medium px-2">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="p-1.5 border border-slate-200 rounded-lg hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              aria-label="Next page"
             >
               <ChevronRight size={16} />
-            </Button>
+            </button>
           </div>
         </div>
       </Card>

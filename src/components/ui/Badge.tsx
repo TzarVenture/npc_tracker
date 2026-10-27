@@ -1,4 +1,4 @@
-/* Badge.tsx: Reusable status indicator component. */
+/* Badge.tsx: Standard status indicator component. */
 import * as React from "react";
 
 export interface BadgeProps {
@@ -10,14 +10,14 @@ export interface BadgeProps {
 }
 
 export function Badge({ className = "", variant = "default", children, ...props }: BadgeProps) {
-  const baseStyles = "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider border transition-colors";
+  const baseStyles = "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium border transition-colors";
   
   const variants = {
-    default: "bg-slate-100 text-slate-700 border-slate-200",
-    success: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    warning: "bg-amber-100 text-amber-700 border-amber-200",
-    danger: "bg-rose-100 text-rose-700 border-rose-200",
-    primary: "bg-indigo-100 text-indigo-700 border-indigo-200"
+    default: "bg-slate-100 text-slate-700 border-slate-200/80",
+    success: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
+    warning: "bg-amber-50 text-amber-700 border-amber-200/80",
+    danger: "bg-rose-50 text-rose-700 border-rose-200/80",
+    primary: "bg-indigo-50 text-indigo-700 border-indigo-200/80"
   };
 
   return (

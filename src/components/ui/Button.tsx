@@ -1,4 +1,4 @@
-/* Button.tsx: Reusable core button component. */
+/* Button.tsx: Reusable accessible button component. */
 import * as React from "react";
 
 export interface ButtonProps {
@@ -10,6 +10,7 @@ export interface ButtonProps {
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void | Promise<void>;
   disabled?: boolean;
   title?: string;
+  "aria-label"?: string;
   type?: "button" | "submit" | "reset";
 }
 
@@ -21,6 +22,7 @@ export function Button({
   onClick,
   disabled,
   title,
+  "aria-label": ariaLabel,
   type = "button",
   style
 }: ButtonProps) {
@@ -45,6 +47,7 @@ export function Button({
       type={type}
       disabled={disabled}
       title={title}
+      aria-label={ariaLabel || title}
       onClick={onClick}
       style={style}
       className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}

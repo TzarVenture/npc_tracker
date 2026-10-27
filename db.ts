@@ -442,13 +442,16 @@ export function getClicksPaginated(page = 1, limit = 20, offerId?: string, statu
     const term = `%${search.trim()}%`;
     params.push(term, term, term, term);
   }
-  if (startDate && startDate.trim()) {
+  const normStart = startDate && startDate.trim() ? (startDate.trim().length === 10 ? `${startDate.trim()}T00:00:00.000Z` : startDate.trim()) : undefined;
+  const normEnd = endDate && endDate.trim() ? (endDate.trim().length === 10 ? `${endDate.trim()}T23:59:59.999Z` : endDate.trim()) : undefined;
+
+  if (normStart) {
     whereClauses.push("timestamp >= ?");
-    params.push(startDate.trim());
+    params.push(normStart);
   }
-  if (endDate && endDate.trim()) {
+  if (normEnd) {
     whereClauses.push("timestamp <= ?");
-    params.push(endDate.trim());
+    params.push(normEnd);
   }
 
   const whereSql = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
@@ -484,13 +487,15 @@ export function getAllClicksFiltered(offerId?: string, status?: string, search?:
     const term = `%${search.trim()}%`;
     params.push(term, term, term, term);
   }
-  if (startDate && startDate.trim()) {
+  const normStart = startDate && startDate.trim() ? (startDate.trim().length === 10 ? `${startDate.trim()}T00:00:00.000Z` : startDate.trim()) : undefined;
+  const normEnd = endDate && endDate.trim() ? (endDate.trim().length === 10 ? `${endDate.trim()}T23:59:59.999Z` : endDate.trim()) : undefined;
+  if (normStart) {
     whereClauses.push("timestamp >= ?");
-    params.push(startDate.trim());
+    params.push(normStart);
   }
-  if (endDate && endDate.trim()) {
+  if (normEnd) {
     whereClauses.push("timestamp <= ?");
-    params.push(endDate.trim());
+    params.push(normEnd);
   }
 
   const whereSql = whereClauses.length > 0 ? "WHERE " + whereClauses.join(" AND ") : "";
@@ -613,8 +618,8 @@ export function savePublisher(publisher: Publisher): Publisher {
   return publisher;
 }
 
-export function deletePublisher(id: string): void {
-  db.prepare("DELETE FROM publishers WHERE id = ?").run(id);
+export function deletePublisher(idOrPubId: string): void {
+  db.prepare("DELETE FROM publishers WHERE id = ? OR pub_id = ?").run(idOrPubId, idOrPubId);
 }
 
 export function getPublisherByPubId(pubId: string): Publisher | undefined {

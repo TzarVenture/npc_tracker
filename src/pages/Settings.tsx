@@ -1,4 +1,4 @@
-/* Settings.tsx: System configuration panel — real change-password, DB stats, API integration reference. */
+/* Settings.tsx: System configuration panel — change-password, multi-domains, database stats, API integration reference. */
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "../components/ui/Card";
@@ -6,23 +6,21 @@ import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
 import { useToast } from "../components/ui/Toast";
+import { copyToClipboard } from "../utils/clipboard";
 import {
   Lock,
   Globe,
   Database,
   BookOpen,
-  Info,
   RefreshCw,
   Eye,
   EyeOff,
-  ShieldCheck,
-  CheckCircle2,
   Copy,
-  Server
+  Plus,
+  Trash2,
+  CheckCircle2
 } from "lucide-react";
-
 import { TrackingDomain } from "../types";
-import { Plus, Trash2, Star, Check } from "lucide-react";
 
 interface DbStats {
   totalClicks: number;
@@ -34,40 +32,30 @@ interface DbStats {
 
 function CodeSnippet({ code, label }: { code: string; label?: string }) {
   const { showToast } = useToast();
-  const copy = () => {
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(code).catch(() => fallbackCopy(code));
-    } else {
-      fallbackCopy(code);
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    const ok = await copyToClipboard(code);
+    if (ok) {
+      setCopied(true);
+      showToast("success", "Copied to clipboard");
+      setTimeout(() => setCopied(false), 2000);
     }
-    showToast("success", "Copied to clipboard!");
   };
 
-  const fallbackCopy = (text: string) => {
-    try {
-      const textarea = document.createElement("textarea");
-      textarea.value = text;
-      textarea.style.position = "fixed";
-      textarea.style.left = "-999999px";
-      textarea.style.top = "-999999px";
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-    } catch (err) {}
-  };
   return (
     <div className="space-y-1">
-      {label && <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</span>}
-      <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2.5">
-        <code className="text-slate-200 font-mono text-[11px] flex-1 break-all leading-relaxed">{code}</code>
+      {label && <span className="text-xs font-medium text-slate-700 block">{label}</span>}
+      <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5">
+        <code className="text-slate-200 font-mono text-xs flex-1 break-all leading-relaxed">{code}</code>
         <button
+          type="button"
           onClick={copy}
-          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded-md transition-colors shrink-0"
+          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-md transition-colors shrink-0 cursor-pointer"
           title="Copy"
+          aria-label="Copy code snippet"
         >
-          <Copy size={13} />
+          {copied ? <CheckCircle2 size={14} className="text-emerald-400" /> : <Copy size={14} />}
         </button>
       </div>
     </div>
@@ -79,19 +67,13 @@ export default function Settings() {
   const [dbStats, setDbStats] = useState<DbStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(true);
   const [postbackSecret, setPostbackSecret] = useState("npc_postback_sec_2026");
-
-  useEffect(() => {
-    axios.get("/api/system-config").then((res) => {
-      if (res.data?.postbackSecret) {
-        setPostbackSecret(res.data.postbackSecret);
-      }
-    }).catch(() => {});
-  }, []);
+  const [showPostbackSecret, setShowPostbackSecret] = useState(false);
 
   // Multi-Domain State
   const [domains, setDomains] = useState<TrackingDomain[]>([]);
   const [newDomainInput, setNewDomainInput] = useState("");
   const [addingDomain, setAddingDomain] = useState(false);
+  const [confirmDeleteDomainId, setConfirmDeleteDomainId] = useState<string | null>(null);
 
   // Change password form
   const [pwForm, setPwForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
@@ -100,6 +82,14 @@ export default function Settings() {
   const [submittingPw, setSubmittingPw] = useState(false);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "http://your-server.com";
+
+  useEffect(() => {
+    axios.get("/api/system-config").then((res) => {
+      if (res.data?.postbackSecret) {
+        setPostbackSecret(res.data.postbackSecret);
+      }
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -114,7 +104,7 @@ export default function Settings() {
           totalRevenue: res.data.totalRevenue
         });
       } catch {
-        // Stats are non-critical — fail silently with null
+        // Non-critical
       } finally {
         setLoadingStats(false);
       }
@@ -140,7 +130,7 @@ export default function Settings() {
       const res = await axios.post("/api/domains", { domain: newDomainInput, isDefault: domains.length === 0 });
       setDomains(prev => [res.data, ...prev.filter(d => !res.data.isDefault || !d.isDefault)]);
       setNewDomainInput("");
-      showToast("success", "Domain added!", `Tracking domain "${res.data.domain}" is ready.`);
+      showToast("success", "Domain added", `Tracking domain "${res.data.domain}" is ready.`);
     } catch (err: any) {
       showToast("error", "Failed to add domain", err?.response?.data?.error || "Invalid domain format.");
     } finally {
@@ -149,6 +139,11 @@ export default function Settings() {
   };
 
   const handleDeleteDomain = async (id: string) => {
+    if (confirmDeleteDomainId !== id) {
+      setConfirmDeleteDomainId(id);
+      return;
+    }
+    setConfirmDeleteDomainId(null);
     try {
       await axios.delete(`/api/domains/${id}`);
       setDomains(prev => prev.filter(d => d.id !== id));
@@ -181,62 +176,44 @@ export default function Settings() {
       return;
     }
     if (newPassword !== confirmPassword) {
-      showToast("error", "Passwords do not match.", "New password and confirm password must be identical.");
-      return;
-    }
-    if (newPassword === currentPassword) {
-      showToast("warning", "New password is same as current.", "Please choose a different password.");
+      showToast("error", "New password and confirmation do not match.");
       return;
     }
 
     setSubmittingPw(true);
     try {
       await axios.post("/api/auth/change-password", { currentPassword, newPassword });
-      showToast("success", "Password changed successfully!", "Your admin password has been updated. Use the new password on your next login.");
       setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      showToast("success", "Password updated successfully", "Use your new password on your next sign-in.");
     } catch (err: any) {
-      showToast("error", "Failed to change password", err?.response?.data?.error || "An unexpected error occurred.");
+      showToast("error", "Password change failed", err?.response?.data?.error || "Current password may be incorrect.");
     } finally {
       setSubmittingPw(false);
     }
   };
 
-  const pwStrength = (pw: string): { label: string; color: string; width: string } => {
-    if (!pw) return { label: "", color: "bg-slate-200", width: "0%" };
-    if (pw.length < 6) return { label: "Too Short", color: "bg-rose-500", width: "20%" };
-    if (pw.length < 8) return { label: "Weak", color: "bg-amber-500", width: "40%" };
-    const hasUpper = /[A-Z]/.test(pw);
-    const hasNum = /[0-9]/.test(pw);
-    const hasSpecial = /[^A-Za-z0-9]/.test(pw);
-    const score = [hasUpper, hasNum, hasSpecial].filter(Boolean).length;
-    if (score === 3 && pw.length >= 12) return { label: "Strong", color: "bg-emerald-500", width: "100%" };
-    if (score >= 2) return { label: "Good", color: "bg-blue-500", width: "70%" };
-    return { label: "Fair", color: "bg-amber-400", width: "50%" };
-  };
-
-  const strength = pwStrength(pwForm.newPassword);
+  const maskedPostbackUrl = `${origin}/api/postback?click_id={CLICK_ID}&token=••••••••••••••••&payout=15.00&revenue=30.00&event=sale`;
+  const realPostbackUrl = `${origin}/api/postback?click_id={CLICK_ID}&token=${postbackSecret}&payout=15.00&revenue=30.00&event=sale`;
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">System Settings</h2>
-          <p className="text-sm text-slate-500">Security configuration, API reference, and database information.</p>
-        </div>
+      {/* Header */}
+      <header className="border-b border-slate-100 pb-6">
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">System Settings</h2>
+        <p className="text-sm text-slate-500">Manage administrative credentials, tracking domains, and integration configurations.</p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left column */}
-        <div className="lg:col-span-2 space-y-6">
-
-          {/* Change Password */}
-          <Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        {/* Left Column */}
+        <div className="space-y-6">
+          {/* Security & Password */}
+          <Card className="border-slate-200 shadow-2xs">
             <CardHeader>
               <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Lock size={18} className="text-indigo-600" /> Change Admin Password
+                <CardTitle className="flex items-center gap-2 text-base text-slate-900">
+                  <Lock size={18} className="text-slate-800" /> Account Security
                 </CardTitle>
-                <CardDescription>Update your admin login credentials. Requires current password verification.</CardDescription>
+                <CardDescription>Update administrative sign-in password.</CardDescription>
               </div>
             </CardHeader>
             <CardContent>
@@ -245,18 +222,18 @@ export default function Settings() {
                   <Input
                     label="Current Password"
                     type={showCurrentPw ? "text" : "password"}
-                    placeholder="Enter your current password"
+                    placeholder="Enter current password"
                     value={pwForm.currentPassword}
-                    onChange={(e) => setPwForm(p => ({ ...p, currentPassword: e.target.value }))}
+                    onChange={(e) => setPwForm({ ...pwForm, currentPassword: e.target.value })}
                     required
                   />
                   <button
                     type="button"
-                    onClick={() => setShowCurrentPw(v => !v)}
-                    className="absolute right-3 top-8 text-slate-400 hover:text-slate-600"
-                    tabIndex={-1}
+                    onClick={() => setShowCurrentPw(!showCurrentPw)}
+                    className="absolute right-3 top-8 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    aria-label={showCurrentPw ? "Hide password" : "Show password"}
                   >
-                    {showCurrentPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                    {showCurrentPw ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
 
@@ -266,123 +243,100 @@ export default function Settings() {
                     type={showNewPw ? "text" : "password"}
                     placeholder="Minimum 8 characters"
                     value={pwForm.newPassword}
-                    onChange={(e) => setPwForm(p => ({ ...p, newPassword: e.target.value }))}
+                    onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })}
                     required
                   />
                   <button
                     type="button"
-                    onClick={() => setShowNewPw(v => !v)}
-                    className="absolute right-3 top-8 text-slate-400 hover:text-slate-600"
-                    tabIndex={-1}
+                    onClick={() => setShowNewPw(!showNewPw)}
+                    className="absolute right-3 top-8 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    aria-label={showNewPw ? "Hide password" : "Show password"}
                   >
-                    {showNewPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                    {showNewPw ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
-                  {pwForm.newPassword && (
-                    <div className="mt-2 space-y-1">
-                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div className={`h-full ${strength.color} rounded-full transition-all duration-300`} style={{ width: strength.width }} />
-                      </div>
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{strength.label}</span>
-                    </div>
-                  )}
                 </div>
 
                 <Input
                   label="Confirm New Password"
-                  type="password"
-                  placeholder="Re-enter your new password"
+                  type={showNewPw ? "text" : "password"}
+                  placeholder="Re-enter new password"
                   value={pwForm.confirmPassword}
-                  onChange={(e) => setPwForm(p => ({ ...p, confirmPassword: e.target.value }))}
+                  onChange={(e) => setPwForm({ ...pwForm, confirmPassword: e.target.value })}
                   required
                 />
-                {pwForm.confirmPassword && pwForm.newPassword && (
-                  <div className={`flex items-center gap-1.5 text-xs font-medium ${pwForm.confirmPassword === pwForm.newPassword ? "text-emerald-600" : "text-rose-500"}`}>
-                    <CheckCircle2 size={13} />
-                    {pwForm.confirmPassword === pwForm.newPassword ? "Passwords match" : "Passwords do not match"}
-                  </div>
-                )}
 
-                <div className="flex items-start gap-3 bg-amber-50 border border-amber-100 p-3 rounded-lg text-xs text-amber-700">
-                  <Info size={14} className="shrink-0 mt-0.5 text-amber-500" />
-                  <span>After changing your password, you will need to use the new password on your next login. Your current session remains valid for 24 hours.</span>
+                <div className="pt-2">
+                  <Button
+                    type="submit"
+                    disabled={submittingPw}
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-xs font-semibold py-2.5"
+                  >
+                    {submittingPw ? <RefreshCw size={14} className="animate-spin" /> : null}
+                    {submittingPw ? "Updating Password..." : "Update Password"}
+                  </Button>
                 </div>
-
-                <Button
-                  type="submit"
-                  className="bg-slate-900 hover:bg-slate-800 font-semibold gap-2"
-                  disabled={submittingPw}
-                >
-                  {submittingPw ? <RefreshCw size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
-                  {submittingPw ? "Updating..." : "Update Password"}
-                </Button>
               </form>
             </CardContent>
           </Card>
 
-          {/* API Integration Reference */}
-          <Card>
+          {/* Integration Reference */}
+          <Card className="border-slate-200 shadow-2xs">
             <CardHeader>
               <div>
-                <CardTitle className="flex items-center gap-2">
-                  <BookOpen size={18} className="text-indigo-600" /> API Integration Reference
+                <CardTitle className="flex items-center gap-2 text-base text-slate-900">
+                  <BookOpen size={18} className="text-slate-800" /> Integration Endpoints
                 </CardTitle>
-                <CardDescription>All endpoint URLs and tracking parameters for integration.</CardDescription>
+                <CardDescription>Endpoint formats for links, client pixels, and postbacks.</CardDescription>
               </div>
             </CardHeader>
             <CardContent className="space-y-5 text-xs text-slate-600">
-              <div className="space-y-3">
-                <p className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">1. Link Redirect (Server-Side Tracking)</p>
+              <div className="space-y-2">
+                <span className="font-medium text-slate-800 block text-xs">1. Server-Side Link Redirect</span>
                 <CodeSnippet
                   code={`${origin}/track?offer_id=CAMPAIGN_ID&pub_id=PUBLISHER_ID&sub_id1=SOURCE&sub_id2=PLACEMENT`}
                 />
-                <ul className="list-disc list-inside text-slate-500 space-y-1 ml-1">
-                  <li><code className="font-mono font-bold text-slate-700">offer_id</code> — Required. Campaign ID from Campaigns tab.</li>
-                  <li><code className="font-mono font-bold text-slate-700">pub_id</code> — Optional. Publisher/affiliate identifier.</li>
-                  <li><code className="font-mono font-bold text-slate-700">sub_id1 / sub_id2</code> — Optional. Sub-trackers (ad group, source, etc).</li>
-                </ul>
               </div>
 
-              <div className="space-y-3">
-                <p className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">2. Client-Side JavaScript Pixel</p>
+              <div className="space-y-2">
+                <span className="font-medium text-slate-800 block text-xs">2. JavaScript Pixel Tag</span>
                 <CodeSnippet code={`<script src="${origin}/cdn/v2/wgt.js?id=CAMPAIGN_ID" async></script>`} />
-                <p className="text-slate-500">Fires silently — no redirect. User stays on page. Controlled by campaign-level delay, frequency cap, and weighted page targeting rules.</p>
               </div>
 
-              <div className="space-y-3">
-                <p className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">3. S2S Postback (Conversion Tracking)</p>
-                <CodeSnippet
-                  code={`${origin}/api/postback?click_id={CLICK_ID}&token=${postbackSecret}&payout=15.00&revenue=30.00&event=sale`}
-                />
-                <ul className="list-disc list-inside text-slate-500 space-y-1 ml-1">
-                  <li><code className="font-mono font-bold text-slate-700">click_id</code> — Required. The click ID returned in tracking URL or pixel response.</li>
-                  <li><code className="font-mono font-bold text-slate-700">token</code> — Required (if enabled). Security authentication secret token.</li>
-                  <li><code className="font-mono font-bold text-slate-700">payout</code> — Optional. Override affiliate payout for this conversion.</li>
-                  <li><code className="font-mono font-bold text-slate-700">revenue</code> — Optional. Override advertiser revenue for this conversion.</li>
-                  <li><code className="font-mono font-bold text-slate-700">event</code> — Optional. Event tier name (e.g. <code>lead</code>, <code>sale</code>, <code>install</code>).</li>
-                </ul>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-800 block text-xs">3. S2S Postback (Conversion Tracking)</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowPostbackSecret(!showPostbackSecret)}
+                    className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer"
+                    aria-label={showPostbackSecret ? "Hide secret token" : "Show secret token"}
+                  >
+                    {showPostbackSecret ? <EyeOff size={13} /> : <Eye size={13} />}
+                    <span>{showPostbackSecret ? "Hide secret" : "Show secret"}</span>
+                  </button>
+                </div>
+                <CodeSnippet code={showPostbackSecret ? realPostbackUrl : maskedPostbackUrl} />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Right column */}
+        {/* Right Column */}
         <div className="space-y-6">
-
           {/* Multi-Domain Tracking Manager */}
-          <Card>
+          <Card className="border-slate-200 shadow-2xs">
             <CardHeader>
               <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Globe size={18} className="text-indigo-600" /> Multi-Domain Tracking Manager
+                <CardTitle className="flex items-center gap-2 text-base text-slate-900">
+                  <Globe size={18} className="text-slate-800" /> Tracking Domains
                 </CardTitle>
-                <CardDescription>Manage multiple tracking domains to generate clean redirect and pixel links.</CardDescription>
+                <CardDescription>Manage alternate tracking domains to generate clean redirect and pixel URLs.</CardDescription>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Current Default / Server Domain */}
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Default Server Domain (Current)</span>
-                <code className="text-sm font-mono font-bold text-indigo-700 block select-all break-all">{origin}</code>
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <span className="text-xs font-medium text-slate-500 block mb-1">Default Server Origin</span>
+                <code className="text-xs font-mono font-semibold text-slate-800 select-all">{origin}</code>
               </div>
 
               {/* Add Domain Form */}
@@ -390,128 +344,110 @@ export default function Settings() {
                 <Input
                   value={newDomainInput}
                   onChange={(e) => setNewDomainInput(e.target.value)}
-                  placeholder="e.g. track1.mybrand.com"
+                  placeholder="e.g. tracker.domain.com"
                   className="flex-1 text-xs"
                 />
-                <Button type="submit" size="sm" disabled={addingDomain || !newDomainInput.trim()} className="gap-1 text-xs whitespace-nowrap">
-                  <Plus size={14} /> Add Domain
+                <Button type="submit" size="sm" disabled={addingDomain || !newDomainInput.trim()} className="text-xs whitespace-nowrap bg-slate-900">
+                  <Plus size={14} /> Add
                 </Button>
               </form>
 
               {/* Domain List */}
               <div className="space-y-2 pt-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Configured Tracking Domains ({domains.length})</span>
+                <span className="text-xs font-medium text-slate-600 block">Configured Domains ({domains.length})</span>
                 {domains.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">No custom tracking domains added yet. Add domain aliases above.</p>
+                  <p className="text-xs text-slate-400 italic">No custom tracking domains configured.</p>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {domains.map((d) => (
-                      <div key={d.id} className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg text-xs hover:border-indigo-200 transition-colors">
-                        <div className="flex items-center gap-2 font-mono truncate">
-                          <Globe size={14} className="text-indigo-500 shrink-0" />
-                          <span className="font-semibold text-slate-800 truncate">{d.domain}</span>
-                          {d.isDefault && (
-                            <Badge variant="success" className="text-[9px] py-0 px-1.5 gap-0.5">
-                              <Star size={10} className="fill-emerald-600" /> Default
-                            </Badge>
-                          )}
+                      <div key={d.id} className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg text-xs hover:border-slate-300 transition-colors">
+                        <div className="flex items-center gap-2 font-mono text-slate-800 font-medium">
+                          {d.domain}
+                          {d.isDefault && <Badge variant="success" className="text-[10px] py-0 px-1.5">Default</Badge>}
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+
+                        <div className="flex items-center gap-2">
                           {!d.isDefault && (
                             <button
                               type="button"
                               onClick={() => handleSetDefaultDomain(d.id)}
-                              className="text-[10px] px-2 py-1 bg-slate-100 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 rounded font-medium transition-colors"
-                              title="Set as Default Tracking Domain"
+                              className="text-xs text-slate-500 hover:text-slate-900 underline cursor-pointer"
                             >
-                              Make Default
+                              Set as Default
                             </button>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteDomain(d.id)}
-                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
-                            title="Delete Domain"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+
+                          {confirmDeleteDomainId === d.id ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteDomain(d.id)}
+                                className="text-xs font-semibold text-rose-600 hover:text-rose-800 border border-rose-200 hover:bg-rose-50 px-2 py-0.5 rounded cursor-pointer"
+                              >
+                                Delete?
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteDomainId(null)}
+                                className="text-xs font-medium text-slate-500 border border-slate-200 hover:bg-slate-50 px-2 py-0.5 rounded cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteDomain(d.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                              title="Delete domain"
+                              aria-label={`Delete domain ${d.domain}`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-
-              <div className="flex gap-2 text-xs text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                <Info size={14} className="shrink-0 text-slate-400 mt-0.5" />
-                <span>Configure CNAME DNS records pointing custom domains to your server IP for multi-domain link generation.</span>
-              </div>
             </CardContent>
           </Card>
 
-          {/* Database Stats */}
-          <Card>
+          {/* Database & Storage Telemetry */}
+          <Card className="border-slate-200 shadow-2xs">
             <CardHeader>
               <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Database size={18} className="text-indigo-600" /> Database Statistics
+                <CardTitle className="flex items-center gap-2 text-base text-slate-900">
+                  <Database size={18} className="text-slate-800" /> Database & Storage
                 </CardTitle>
-                <CardDescription>Live database performance metrics.</CardDescription>
+                <CardDescription>SQLite disk storage and runtime persistence details.</CardDescription>
               </div>
             </CardHeader>
             <CardContent>
               {loadingStats ? (
-                <div className="flex items-center gap-2 text-slate-500 text-xs py-2">
-                  <RefreshCw size={14} className="animate-spin" /> Loading stats...
+                <div className="flex items-center gap-2 text-xs text-slate-500 py-3">
+                  <RefreshCw size={14} className="animate-spin text-slate-600" /> Loading metrics...
                 </div>
               ) : dbStats ? (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {[
-                    { label: "Total Click Events", value: dbStats.totalClicks.toLocaleString() },
-                    { label: "Total Conversions", value: dbStats.totalConversions.toLocaleString() },
-                    { label: "Active Campaigns", value: `${dbStats.activeOffers} / ${dbStats.totalOffers}` },
-                    { label: "Total Revenue", value: `₹${dbStats.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}` },
+                    { label: "Total Clicks Recorded", value: dbStats.totalClicks.toLocaleString() },
+                    { label: "Total Conversions Recorded", value: dbStats.totalConversions.toLocaleString() },
+                    { label: "Active Campaigns", value: `${dbStats.activeOffers} of ${dbStats.totalOffers}` },
+                    { label: "Total Tracked Revenue", value: `₹${dbStats.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
+                    { label: "Database Engine", value: "SQLite 3 (WAL Mode)" },
+                    { label: "Storage Persistence", value: "tracker.sqlite" }
                   ].map(row => (
-                    <div key={row.label} className="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
-                      <span className="text-xs text-slate-500">{row.label}</span>
-                      <span className="text-xs font-bold text-slate-900">{row.value}</span>
+                    <div key={row.label} className="flex justify-between items-center py-2 border-b border-slate-100 last:border-0">
+                      <span className="text-xs text-slate-600">{row.label}</span>
+                      <span className="text-xs font-semibold text-slate-900">{row.value}</span>
                     </div>
                   ))}
-                  <div className="flex items-center gap-2 text-[10px] text-emerald-600 font-semibold pt-1">
-                    <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                    High-Speed Storage Engine — Healthy
-                  </div>
                 </div>
               ) : (
-                <p className="text-xs text-slate-400">Unable to load statistics.</p>
+                <p className="text-xs text-slate-500 font-medium">Unable to load storage metrics.</p>
               )}
-            </CardContent>
-          </Card>
-
-          {/* Security Status */}
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Server size={18} className="text-indigo-600" /> Security Status
-                </CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2.5 text-xs">
-              {[
-                { label: "JWT Authentication", ok: true },
-                { label: "Password Hashing (bcrypt)", ok: true },
-                { label: "Login Rate Limiting", ok: true },
-                { label: "Session Cookie", ok: true },
-                { label: "Auth Token (24h TTL)", ok: true },
-              ].map(item => (
-                <div key={item.label} className="flex items-center justify-between">
-                  <span className="text-slate-600">{item.label}</span>
-                  <Badge variant={item.ok ? "success" : "danger"} className="text-[9px]">
-                    {item.ok ? "Active" : "Disabled"}
-                  </Badge>
-                </div>
-              ))}
             </CardContent>
           </Card>
         </div>

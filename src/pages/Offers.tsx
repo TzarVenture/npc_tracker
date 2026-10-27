@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import axios from "axios";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -6,6 +7,7 @@ import { Input, Select } from "../components/ui/Input";
 import { Badge } from "../components/ui/Badge";
 import { Switch } from "../components/ui/Switch";
 import { useToast } from "../components/ui/Toast";
+import { copyToClipboard } from "../utils/clipboard";
 import {
   Plus,
   Search,
@@ -16,23 +18,48 @@ import {
   Edit,
   X,
   ExternalLink,
-  Info,
   Code,
-  Calendar,
-  Layers,
   Clock,
-  ShieldCheck,
   Shuffle,
   Globe,
   Pause,
   Play,
-  RefreshCw
+  RefreshCw,
+  Eye,
+  EyeOff
 } from "lucide-react";
 import { Offer, OfferEvent, TrackingUrlItem, TargetPageRule, TrackingDomain } from "../types";
+import { CountrySelect } from "../components/ui/CountrySelect";
+import { normalizeCountryCode } from "../utils/countries";
+
+function toLocalDatetimeInput(isoString?: string | null): string {
+  if (!isoString) return "";
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function toUtcIsoString(localString?: string | null): string | null {
+  if (!localString || !localString.trim()) return null;
+  const date = new Date(localString);
+  if (isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+const POPULAR_BROWSERS = ["Chrome", "Safari", "Firefox", "Edge", "Opera", "Mobile Safari", "Samsung Internet"];
+const POPULAR_CITIES = ["New York", "London", "Singapore", "Mumbai", "Tokyo", "Sydney", "Toronto", "Dubai", "Paris", "Berlin"];
+const POPULAR_ISPS = ["Comcast", "Verizon", "AT&T", "Spectrum", "Vodafone", "Jio", "Airtel", "Deutsche Telekom"];
 
 export default function Offers() {
   const { showToast } = useToast();
   const [offers, setOffers] = useState<Offer[]>([]);
+  const [loading, setLoading] = useState(true);
   const [domains, setDomains] = useState<TrackingDomain[]>([]);
   const [selectedDomain, setSelectedDomain] = useState<string>("");
   const [showDrawer, setShowDrawer] = useState(false);
@@ -41,10 +68,17 @@ export default function Offers() {
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedOfferForCode, setSelectedOfferForCode] = useState<Offer | null>(null);
+  const [showSecret, setShowSecret] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [postbackSecret, setPostbackSecret] = useState("npc_postback_sec_2026");
+  const [formErrors, setFormErrors] = useState<{ name?: string; destinationUrl?: string }>({});
+
+  // Input states for pickers
+  const [cityInput, setCityInput] = useState("");
+  const [browserInput, setBrowserInput] = useState("");
+  const [ispInput, setIspInput] = useState("");
 
   useEffect(() => {
     axios.get("/api/system-config").then((res) => {
@@ -55,13 +89,13 @@ export default function Offers() {
   }, []);
 
   // Form state
-  const [formData, setFormData] = useState({
+  const initialFormState = {
     name: "",
     destinationUrl: "",
     fallbackUrl: "",
     payout: 4.5,
     revenue: 12.0,
-    geoTargeting: "",
+    geoTargeting: [] as string[],
     cityTargeting: "",
     deviceType: "All" as "All" | "Mobile" | "Desktop",
     osType: "All" as "All" | "iOS" | "Android" | "Windows",
@@ -87,12 +121,12 @@ export default function Offers() {
     customReferrerUrl: "",
     targetPageRules: [] as TargetPageRule[],
     status: "active" as "active" | "paused"
-  });
+  };
 
-  // Event creation temporary form state
+  const [formData, setFormData] = useState(initialFormState);
+
+  // Sub-items temporary forms
   const [newEvent, setNewEvent] = useState({ eventName: "", payout: 0, revenue: 0 });
-
-  // Tracking URL creation temporary form state
   const [newTrackingUrl, setNewTrackingUrl] = useState({
     name: "",
     url: "",
@@ -101,26 +135,15 @@ export default function Offers() {
     status: "active" as "active" | "paused"
   });
 
-  // TargetPageRule creation temporary form state
-  const [newPageRule, setNewPageRule] = useState<Omit<TargetPageRule, 'id'>>({
-    path: "",
-    weight: 50,
-    delayMs: 0,
-    matchType: "contains",
-    status: "active"
-  });
-
-  useEffect(() => {
-    fetchOffers();
-    fetchDomains();
-  }, []);
-
   const fetchOffers = async () => {
+    setLoading(true);
     try {
       const res = await axios.get("/api/offers");
       setOffers(res.data);
     } catch (err: any) {
-      showToast("error", "Failed to load campaigns", err?.response?.data?.error || "Please refresh the page.");
+      showToast("error", "Failed to load campaigns", err?.response?.data?.error || "Network error.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -135,22 +158,185 @@ export default function Offers() {
     } catch (e) {}
   };
 
+  useEffect(() => {
+    fetchOffers();
+    fetchDomains();
+  }, []);
+
+  // Close modals on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (selectedOfferForCode) {
+          setSelectedOfferForCode(null);
+        } else if (showDrawer) {
+          handleCloseDrawer();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showDrawer, selectedOfferForCode, formData]);
+
+  // Lock body scroll when modal or drawer is open
+  useEffect(() => {
+    if (showDrawer || selectedOfferForCode) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [showDrawer, selectedOfferForCode]);
+
+  const handleDestinationUrlChange = (newUrl: string) => {
+    setFormData(prev => {
+      let urls = [...prev.trackingUrls];
+      const primaryIndex = urls.findIndex(u => u.id === "primary");
+      if (primaryIndex >= 0) {
+        urls[primaryIndex] = { ...urls[primaryIndex], url: newUrl };
+      } else if (urls.length > 0) {
+        urls.unshift({
+          id: "primary",
+          name: "Primary Landing Page",
+          url: newUrl,
+          weight: Math.max(1, 100 - urls.reduce((sum, u) => sum + (Number(u.weight) || 0), 0)),
+          deviceType: "All",
+          status: "active"
+        });
+      }
+      return {
+        ...prev,
+        destinationUrl: newUrl,
+        trackingUrls: urls
+      };
+    });
+  };
+
+  const handleAddTrackingUrl = () => {
+    if (!newTrackingUrl.name.trim() || !newTrackingUrl.url.trim()) {
+      showToast("warning", "Missing fields", "Please provide both a label and a destination URL.");
+      return;
+    }
+
+    let currentUrls = [...formData.trackingUrls];
+    const hasPrimary = currentUrls.some(u => u.id === "primary" || u.url === formData.destinationUrl);
+    if (!hasPrimary && formData.destinationUrl.trim()) {
+      currentUrls.unshift({
+        id: "primary",
+        name: "Primary Landing Page",
+        url: formData.destinationUrl.trim(),
+        weight: 50,
+        deviceType: "All",
+        status: "active"
+      });
+    }
+
+    const item: TrackingUrlItem = {
+      id: "url-" + Math.random().toString(36).substring(2, 9),
+      name: newTrackingUrl.name.trim(),
+      url: newTrackingUrl.url.trim(),
+      weight: Number(newTrackingUrl.weight) || (currentUrls.length === 1 ? 50 : Math.max(10, Math.floor(100 / (currentUrls.length + 1)))),
+      deviceType: newTrackingUrl.deviceType,
+      status: newTrackingUrl.status
+    };
+
+    const updated = [...currentUrls, item];
+    if (updated.length === 2 && updated[0].id === "primary") {
+      updated[0].weight = 50;
+      updated[1].weight = 50;
+    }
+
+    setFormData(prev => ({ ...prev, trackingUrls: updated }));
+    setNewTrackingUrl({ name: "", url: "", weight: 50, deviceType: "All", status: "active" });
+    showToast("success", "Rotation URL added", `Added "${item.name}" to rotation pool.`);
+  };
+
+  const handleRemoveTrackingUrl = (id: string) => {
+    if (id === "primary") {
+      showToast("warning", "Cannot remove primary page", "Edit its URL in Step 1.");
+      return;
+    }
+    const remaining = formData.trackingUrls.filter(u => u.id !== id);
+    if (remaining.length === 1 && remaining[0].id === "primary") {
+      remaining[0].weight = 100;
+    }
+    setFormData(prev => ({ ...prev, trackingUrls: remaining }));
+    showToast("info", "Landing page removed", "Removed page from rotation.");
+  };
+
+  const handleUpdateTrackingUrlWeight = (id: string, newWeight: number) => {
+    const safeWeight = Math.max(1, Math.min(100, Math.round(newWeight) || 1));
+    setFormData(prev => ({
+      ...prev,
+      trackingUrls: prev.trackingUrls.map(u => u.id === id ? { ...u, weight: safeWeight } : u)
+    }));
+  };
+
+  const handleEqualizeTrackingUrls = () => {
+    if (formData.trackingUrls.length === 0) return;
+    const count = formData.trackingUrls.length;
+    const baseShare = Math.floor(100 / count);
+    const remainder = 100 - (baseShare * count);
+    setFormData(prev => ({
+      ...prev,
+      trackingUrls: prev.trackingUrls.map((u, i) => ({
+        ...u,
+        weight: baseShare + (i < remainder ? 1 : 0)
+      }))
+    }));
+    showToast("success", "Weights balanced", `Split 100% equally across ${count} pages.`);
+  };
+
+  const isFormDirty = () => {
+    return Boolean(
+      formData.name.trim() ||
+      formData.destinationUrl.trim() ||
+      formData.fallbackUrl.trim() ||
+      formData.trackingUrls.length > 0 ||
+      formData.eventsList.length > 0 ||
+      formData.cityTargeting ||
+      formData.browserTargeting ||
+      formData.ispTargeting
+    );
+  };
+
+  const handleCloseDrawer = () => {
+    if (isFormDirty() && !editingOfferId) {
+      if (!window.confirm("You have unsaved changes in this campaign form. Discard?")) {
+        return;
+      }
+    }
+    setShowDrawer(false);
+    setEditingOfferId(null);
+    setCurrentStep(1);
+    setFormErrors({});
+    setFormData(initialFormState);
+  };
+
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim() || !formData.destinationUrl.trim()) {
-      showToast("error", "Required fields missing", "Campaign Name and Destination URL are required.");
+
+    const errors: { name?: string; destinationUrl?: string } = {};
+    if (!formData.name.trim()) errors.name = "Campaign name is required.";
+    if (!formData.destinationUrl.trim()) errors.destinationUrl = "Landing page URL is required.";
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      setCurrentStep(1);
+      showToast("error", "Missing required fields", "Please fill in the required fields on Step 1.");
       return;
     }
 
     const parseCSV = (str: string) => str ? str.split(",").map(g => g.trim().toUpperCase()).filter(g => g.length > 0) : [];
 
     const payload = {
-      name: formData.name,
-      destinationUrl: formData.destinationUrl,
-      fallbackUrl: formData.fallbackUrl || formData.destinationUrl,
+      name: formData.name.trim(),
+      destinationUrl: formData.destinationUrl.trim(),
+      fallbackUrl: formData.fallbackUrl.trim() || formData.destinationUrl.trim(),
       payout: Number(formData.payout) || 0,
       revenue: Number(formData.revenue) || 10,
-      geoTargeting: parseCSV(formData.geoTargeting),
+      geoTargeting: formData.geoTargeting.map(normalizeCountryCode).filter(Boolean),
       cityTargeting: parseCSV(formData.cityTargeting),
       deviceType: formData.deviceType,
       osType: formData.osType,
@@ -158,8 +344,8 @@ export default function Offers() {
       ispTargeting: parseCSV(formData.ispTargeting),
       dailyCap: Number(formData.dailyCap) || 0,
       hourlyCap: Number(formData.hourlyCap) || 0,
-      startDate: formData.startDate || null,
-      endDate: formData.endDate || null,
+      startDate: toUtcIsoString(formData.startDate),
+      endDate: toUtcIsoString(formData.endDate),
       duplicateWindowMinutes: Number(formData.duplicateWindowMinutes) || 0,
       events: formData.eventsList,
       actionOnFilter: formData.actionOnFilter,
@@ -182,16 +368,20 @@ export default function Offers() {
     try {
       if (editingOfferId) {
         await axios.put(`/api/offers/${editingOfferId}`, payload);
-        showToast("success", "Campaign updated!", `"${payload.name}" has been saved.`);
+        showToast("success", "Campaign updated", `"${payload.name}" has been saved.`);
       } else {
         await axios.post("/api/offers", payload);
-        showToast("success", "Campaign created!", `"${payload.name}" is now active.`);
+        showToast("success", "Campaign created", `"${payload.name}" is now active.`);
       }
-      closeDrawer();
+      setShowDrawer(false);
+      setEditingOfferId(null);
+      setCurrentStep(1);
+      setFormErrors({});
+      setFormData(initialFormState);
       fetchOffers();
     } catch (err: any) {
       const raw = err.response?.data?.error || err.response?.data || err.message;
-      const errMsg = typeof raw === "string" ? raw : (raw?.message || "Failed to save campaign. Please check your inputs or log in again.");
+      const errMsg = typeof raw === "string" ? raw : (raw?.message || "Failed to save campaign.");
       showToast("error", "Save failed", errMsg);
     } finally {
       setSubmitting(false);
@@ -200,13 +390,40 @@ export default function Offers() {
 
   const handleEditClick = (offer: Offer) => {
     setEditingOfferId(offer._id);
+    setFormErrors({});
+
+    const initialTrackingUrls: TrackingUrlItem[] = Array.isArray(offer.trackingUrls) ? [...offer.trackingUrls] : [];
+    const hasPrimary = initialTrackingUrls.some(u => u.id === "primary" || u.url === offer.destinationUrl);
+    if (!hasPrimary && offer.destinationUrl) {
+      if (initialTrackingUrls.length > 0) {
+        const variantSum = initialTrackingUrls.reduce((sum, u) => sum + (Number(u.weight) || 0), 0);
+        initialTrackingUrls.unshift({
+          id: "primary",
+          name: "Primary Landing Page",
+          url: offer.destinationUrl,
+          weight: Math.max(1, 100 - variantSum),
+          deviceType: "All",
+          status: "active"
+        });
+      } else {
+        initialTrackingUrls.push({
+          id: "primary",
+          name: "Primary Landing Page",
+          url: offer.destinationUrl,
+          weight: 100,
+          deviceType: "All",
+          status: "active"
+        });
+      }
+    }
+
     setFormData({
       name: offer.name,
       destinationUrl: offer.destinationUrl,
       fallbackUrl: offer.fallbackUrl,
       payout: offer.payout,
       revenue: offer.revenue,
-      geoTargeting: (offer.geoTargeting || []).join(", "),
+      geoTargeting: (offer.geoTargeting || []).map(normalizeCountryCode).filter(Boolean),
       cityTargeting: (offer.cityTargeting || []).join(", "),
       deviceType: offer.deviceType,
       osType: offer.osType,
@@ -214,8 +431,8 @@ export default function Offers() {
       ispTargeting: (offer.ispTargeting || []).join(", "),
       dailyCap: offer.dailyCap || 0,
       hourlyCap: offer.hourlyCap || 0,
-      startDate: offer.startDate ? offer.startDate.substring(0, 16) : "",
-      endDate: offer.endDate ? offer.endDate.substring(0, 16) : "",
+      startDate: toLocalDatetimeInput(offer.startDate),
+      endDate: toLocalDatetimeInput(offer.endDate),
       duplicateWindowMinutes: offer.duplicateWindowMinutes || 0,
       eventsList: offer.events || [],
       actionOnFilter: offer.actionOnFilter,
@@ -227,7 +444,7 @@ export default function Offers() {
       frequencyCap: offer.frequencyCap || "unlimited",
       sessionCheckEnabled: Boolean(offer.sessionCheckEnabled),
       sessionTtlMinutes: offer.sessionTtlMinutes || 1440,
-      trackingUrls: offer.trackingUrls || [],
+      trackingUrls: initialTrackingUrls,
       redirectType: offer.redirectType || "302",
       customReferrerUrl: offer.customReferrerUrl || "",
       targetPageRules: offer.targetPageRules || [],
@@ -245,7 +462,7 @@ export default function Offers() {
     setConfirmDeleteId(null);
     try {
       await axios.delete(`/api/offers/${id}`);
-      showToast("success", "Campaign deleted", `"${name}" has been permanently removed.`);
+      showToast("success", "Campaign deleted", `"${name}" removed.`);
       fetchOffers();
     } catch (err: any) {
       showToast("error", "Delete failed", err?.response?.data?.error || "Please try again.");
@@ -270,143 +487,34 @@ export default function Offers() {
     if (!newEvent.eventName.trim()) return;
     setFormData(prev => ({
       ...prev,
-      eventsList: [...prev.eventsList, { eventName: newEvent.eventName.trim(), payout: Number(newEvent.payout) || 0, revenue: Number(newEvent.revenue) || 0 }]
+      eventsList: [
+        ...prev.eventsList,
+        {
+          eventName: newEvent.eventName.trim(),
+          payout: Number(newEvent.payout) || 0,
+          revenue: Number(newEvent.revenue) || 0
+        }
+      ]
     }));
     setNewEvent({ eventName: "", payout: 0, revenue: 0 });
+    showToast("success", "Event rule added", `"${newEvent.eventName.trim()}" event attached.`);
   };
 
-  const handleRemoveEvent = (idx: number) => {
+  const handleRemoveEvent = (index: number) => {
     setFormData(prev => ({
       ...prev,
-      eventsList: prev.eventsList.filter((_, i) => i !== idx)
+      eventsList: prev.eventsList.filter((_, i) => i !== index)
     }));
+    showToast("info", "Event removed", "Event rule deleted.");
   };
 
-  const handleAddTrackingUrl = () => {
-    if (!newTrackingUrl.name.trim() || !newTrackingUrl.url.trim()) {
-      showToast("error", "URL fields missing", "Label Name and Target URL are required for rotation.");
-      return;
+  const handleCopy = async (text: string, id: string) => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedId(id);
+      showToast("success", "Copied to clipboard");
+      setTimeout(() => setCopiedId(null), 2000);
     }
-    const item: TrackingUrlItem = {
-      id: "url-" + Math.random().toString(36).substring(2, 9),
-      name: newTrackingUrl.name.trim(),
-      url: newTrackingUrl.url.trim(),
-      weight: Number(newTrackingUrl.weight) || 50,
-      deviceType: newTrackingUrl.deviceType,
-      status: newTrackingUrl.status
-    };
-    setFormData(prev => ({
-      ...prev,
-      trackingUrls: [...prev.trackingUrls, item]
-    }));
-    setNewTrackingUrl({ name: "", url: "", weight: 50, deviceType: "All", status: "active" });
-  };
-
-  const handleRemoveTrackingUrl = (id: string) => {
-    setFormData(prev => ({
-      ...prev,
-      trackingUrls: prev.trackingUrls.filter(u => u.id !== id)
-    }));
-  };
-
-  const handleUpdateTrackingUrlWeight = (id: string, newWeight: number) => {
-    const safeWeight = Math.max(1, Math.min(100, Math.round(newWeight) || 1));
-    setFormData(prev => ({
-      ...prev,
-      trackingUrls: prev.trackingUrls.map(u => u.id === id ? { ...u, weight: safeWeight } : u)
-    }));
-  };
-
-  const handleStepTrackingUrlWeight = (id: string, delta: number) => {
-    setFormData(prev => ({
-      ...prev,
-      trackingUrls: prev.trackingUrls.map(u => {
-        if (u.id !== id) return u;
-        const current = Number(u.weight) || 0;
-        const next = Math.max(1, Math.min(100, current + delta));
-        return { ...u, weight: next };
-      })
-    }));
-  };
-
-  const handleEqualizeTrackingUrls = () => {
-    if (formData.trackingUrls.length === 0) return;
-    const count = formData.trackingUrls.length;
-    const baseShare = Math.floor(100 / count);
-    const remainder = 100 - (baseShare * count);
-    setFormData(prev => ({
-      ...prev,
-      trackingUrls: prev.trackingUrls.map((u, i) => ({
-        ...u,
-        weight: baseShare + (i < remainder ? 1 : 0)
-      }))
-    }));
-    showToast("success", "Weights balanced", `All ${count} rotation links set to equal percentage splits.`);
-  };
-
-  const closeDrawer = () => {
-    setShowDrawer(false);
-    setEditingOfferId(null);
-    setCurrentStep(1);
-    setFormData({
-      name: "",
-      destinationUrl: "",
-      fallbackUrl: "",
-      payout: 4.5,
-      revenue: 12.0,
-      geoTargeting: "",
-      cityTargeting: "",
-      deviceType: "All",
-      osType: "All",
-      browserTargeting: "",
-      ispTargeting: "",
-      dailyCap: 0,
-      hourlyCap: 0,
-      startDate: "",
-      endDate: "",
-      duplicateWindowMinutes: 0,
-      eventsList: [],
-      actionOnFilter: "redirect",
-      blockBots: true,
-      targetPages: "",
-      triggerDelayMs: 0,
-      triggerIntervalMs: 0,
-      triggerRepeatCount: 0,
-      frequencyCap: "unlimited",
-      sessionCheckEnabled: false,
-      sessionTtlMinutes: 1440,
-      trackingUrls: [],
-      redirectType: "302",
-      customReferrerUrl: "",
-      targetPageRules: [],
-      status: "active"
-    });
-  };
-
-  const copyToClipboard = (text: string, id: string) => {
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
-    } else {
-      fallbackCopy(text);
-    }
-    setCopiedId(id);
-    showToast("success", "Copied to Clipboard!", "Integration code copied.");
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const fallbackCopy = (text: string) => {
-    try {
-      const textarea = document.createElement("textarea");
-      textarea.value = text;
-      textarea.style.position = "fixed";
-      textarea.style.left = "-999999px";
-      textarea.style.top = "-999999px";
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-    } catch (err) {}
   };
 
   const nextStep = () => setCurrentStep((prev) => Math.min(prev + 1, 4));
@@ -431,58 +539,93 @@ export default function Offers() {
   const getImagePixelTag = (offerId: string) => `<img src="${getActiveBaseUrl()}/px?offer_id=${offerId}&fmt=img" width="1" height="1" style="display:none;" alt="" />`;
   const getIframePixelTag = (offerId: string) => `<iframe src="${getActiveBaseUrl()}/px?offer_id=${offerId}&fmt=iframe" width="1" height="1" style="display:none;"></iframe>`;
 
+  // Targeting Helper functions for City, Browser, and ISP
+  const getTargetingList = (str: string) => str ? str.split(",").map(s => s.trim()).filter(Boolean) : [];
+  
+  const toggleItemInList = (currentStr: string, item: string) => {
+    const list = getTargetingList(currentStr);
+    const upper = item.trim().toUpperCase();
+    const exists = list.some(x => x.toUpperCase() === upper);
+    const updated = exists ? list.filter(x => x.toUpperCase() !== upper) : [...list, item.trim()];
+    return updated.join(", ");
+  };
+
+  const addItemToList = (currentStr: string, item: string) => {
+    if (!item.trim()) return currentStr;
+    const list = getTargetingList(currentStr);
+    const upper = item.trim().toUpperCase();
+    if (list.some(x => x.toUpperCase() === upper)) return currentStr;
+    return [...list, item.trim()].join(", ");
+  };
+
+  const removeItemFromList = (currentStr: string, item: string) => {
+    const list = getTargetingList(currentStr);
+    const upper = item.trim().toUpperCase();
+    return list.filter(x => x.toUpperCase() !== upper).join(", ");
+  };
+
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
       {/* Header section */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Campaigns</h2>
-          <p className="text-sm text-slate-500">Manage tracking links, multi-event payouts, and targeting controls.</p>
+          <p className="text-sm text-slate-500">Manage tracking links, landing page rotation, and targeting rules.</p>
         </div>
-        <Button onClick={() => setShowDrawer(true)} className="gap-2 shadow-sm cursor-pointer">
+        <Button onClick={() => setShowDrawer(true)} className="gap-2 shadow-xs cursor-pointer">
           <Plus size={16} /> New Campaign
         </Button>
       </header>
 
       {/* Campaign List Table */}
-      <Card className="flex flex-col overflow-hidden">
+      <Card className="flex flex-col overflow-hidden border-slate-200 shadow-2xs">
         <CardHeader className="bg-slate-50/50">
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <div className="relative flex-1 sm:flex-none">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
               <input
                 type="text"
                 placeholder="Search campaigns..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-4 py-2 w-full sm:w-64 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-500 transition-all placeholder:text-slate-400"
+                className="pl-9 pr-4 py-2 w-full sm:w-64 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-800 transition-all placeholder:text-slate-400"
+                aria-label="Search campaigns"
               />
             </div>
           </div>
         </CardHeader>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse whitespace-nowrap">
-            <thead className="bg-slate-50 text-slate-400 text-[10px] uppercase font-bold tracking-widest border-b border-slate-200/50">
+        <div className="overflow-x-auto min-w-full">
+          <table className="w-full text-left border-collapse whitespace-nowrap min-w-[860px]">
+            <thead className="bg-slate-50 text-slate-600 text-xs font-semibold border-b border-slate-200">
               <tr>
-                             <th className="px-6 py-4">Campaign</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Caps & Schedule</th>
-                <th className="px-6 py-4 text-right">Metrics</th>
-                <th className="px-6 py-4 text-center">Integration Code</th>
-                <th className="px-6 py-4 text-center">Manage</th>
+                <th className="px-6 py-3.5">Campaign</th>
+                <th className="px-6 py-3.5">Status</th>
+                <th className="px-6 py-3.5">Schedule & Caps</th>
+                <th className="px-6 py-3.5 text-right">Default Values</th>
+                <th className="px-6 py-3.5 text-center">Tracking Snippets</th>
+                <th className="px-6 py-3.5 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="text-sm divide-y divide-slate-100">
-              {filteredOffers.length === 0 ? (
+              {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-slate-400">
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 font-medium">
+                    <div className="flex items-center justify-center gap-2">
+                      <RefreshCw size={15} className="animate-spin text-slate-600" />
+                      <span>Loading campaigns...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : filteredOffers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500 font-medium text-sm">
                     No campaigns found.
                   </td>
                 </tr>
               ) : (
                 filteredOffers.map((offer) => (
-                  <tr key={offer._id} className="hover:bg-slate-50/40 transition-colors">
+                  <tr key={offer._id} className="hover:bg-slate-50/60 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
@@ -494,10 +637,10 @@ export default function Offers() {
                             href={offer.destinationUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-xs text-indigo-600 flex items-center gap-0.5 hover:underline truncate mt-0.5"
+                            className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 mt-0.5 truncate"
                           >
-                            {offer.destinationUrl}
-                            <ExternalLink size={10} />
+                            <span className="truncate">{offer.destinationUrl}</span>
+                            <ExternalLink size={10} className="shrink-0" />
                           </a>
                         </div>
                       </div>
@@ -507,39 +650,32 @@ export default function Offers() {
                         {offer.status}
                       </Badge>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="space-y-1 text-xs text-slate-600">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-[10px] text-slate-400 uppercase">Caps:</span>
-                          <span>Daily: {offer.dailyCap || "∞"} | Hourly: {offer.hourlyCap || "∞"}</span>
-                        </div>
+                    <td className="px-6 py-4 text-xs text-slate-600">
+                      <div className="space-y-1">
                         {offer.startDate && (
-                          <div className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
-                            <Clock size={10} /> {new Date(offer.startDate).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          <div className="flex items-center gap-1.5 text-slate-600">
+                            <Clock size={12} className="text-slate-500" />
+                            <span>Starts: {new Date(offer.startDate).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                           </div>
                         )}
+                        <div className="text-slate-500">
+                          Daily Cap: {offer.dailyCap ? `${offer.dailyCap.toLocaleString()} clicks` : "Unlimited"}
+                        </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="font-bold text-slate-900">₹{offer.revenue.toFixed(2)} Rev / ₹{offer.payout.toFixed(2)} Pay</div>
-                      <div className="text-[10px] text-slate-500 font-medium mt-0.5">
-                        {offer.totalConversions !== undefined && offer.totalConversions > 0 ? (
-                          <span className="text-emerald-600 font-bold">{offer.totalConversions} conv • CR: {(offer.conversionRate || 0).toFixed(1)}%</span>
-                        ) : offer.events && offer.events.length > 0 ? (
-                          <span className="text-indigo-600 font-bold">{offer.events.length} Custom Event Tiers</span>
-                        ) : (
-                          "No conversions yet"
-                        )}
-                      </div>
+                    <td className="px-6 py-4 text-right font-medium text-slate-800">
+                      <div>Rev: ₹{(Number(offer.revenue) || 0).toFixed(2)}</div>
+                      <div className="text-xs text-slate-500">Payout: ₹{(Number(offer.payout) || 0).toFixed(2)}</div>
                     </td>
                     <td className="px-6 py-4 text-center">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => setSelectedOfferForCode(offer)}
-                        className="gap-1.5 text-xs text-indigo-700 bg-indigo-50 border-indigo-100 hover:bg-indigo-100"
+                        className="gap-1.5 text-xs text-slate-700 bg-white"
+                        aria-label="View tracking snippets and postback"
                       >
-                        <Code size={13} /> Get Links & Pixel
+                        <Code size={13} /> Snippets & Links
                       </Button>
                     </td>
                     <td className="px-6 py-4 text-center">
@@ -547,48 +683,49 @@ export default function Offers() {
                         <button
                           onClick={() => handleTogglePause(offer)}
                           disabled={togglingId === offer._id}
-                          className={`p-1.5 rounded-lg transition-colors ${
-                            offer.status === "active"
-                              ? "text-slate-400 hover:text-amber-600 hover:bg-amber-50"
-                              : "text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
-                          }`}
+                          className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                           title={offer.status === "active" ? "Pause Campaign" : "Activate Campaign"}
+                          aria-label={offer.status === "active" ? "Pause Campaign" : "Activate Campaign"}
                         >
-                          {togglingId === offer._id
-                            ? <RefreshCw size={15} className="animate-spin" />
-                            : offer.status === "active"
-                              ? <Pause size={15} />
-                              : <Play size={15} />}
+                          {togglingId === offer._id ? (
+                            <RefreshCw size={15} className="animate-spin text-slate-600" />
+                          ) : offer.status === "active" ? (
+                            <Pause size={15} />
+                          ) : (
+                            <Play size={15} />
+                          )}
                         </button>
                         <button
                           onClick={() => handleEditClick(offer)}
-                          className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                           title="Edit Campaign"
+                          aria-label="Edit Campaign"
                         >
-                          <Edit size={16} />
+                          <Edit size={15} />
                         </button>
                         {confirmDeleteId === offer._id ? (
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => handleDeleteOffer(offer._id, offer.name)}
-                              className="text-[10px] font-bold text-rose-600 hover:text-rose-800 border border-rose-200 hover:bg-rose-50 px-1.5 py-0.5 rounded transition-colors"
+                              className="text-xs font-semibold text-rose-600 hover:text-rose-800 border border-rose-200 hover:bg-rose-50 px-2 py-0.5 rounded transition-colors cursor-pointer"
                             >
-                              Yes
+                              Delete?
                             </button>
                             <button
                               onClick={() => setConfirmDeleteId(null)}
-                              className="text-[10px] font-bold text-slate-500 border border-slate-200 hover:bg-slate-50 px-1.5 py-0.5 rounded transition-colors"
+                              className="text-xs font-medium text-slate-500 border border-slate-200 hover:bg-slate-50 px-2 py-0.5 rounded transition-colors cursor-pointer"
                             >
-                              No
+                              Cancel
                             </button>
                           </div>
                         ) : (
                           <button
                             onClick={() => handleDeleteOffer(offer._id, offer.name)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                             title="Delete Campaign"
+                            aria-label={`Delete campaign ${offer.name}`}
                           >
-                            <Trash2 size={16} />
+                            <Trash2 size={15} />
                           </button>
                         )}
                       </div>
@@ -602,34 +739,43 @@ export default function Offers() {
       </Card>
 
       {/* Integration Links Modal */}
-      {selectedOfferForCode && (
-        <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <Card className="max-w-2xl w-full bg-white shadow-2xl animate-fadeIn">
+      {selectedOfferForCode && createPortal(
+        <div
+          className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fadeIn"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedOfferForCode(null);
+          }}
+        >
+          <Card className="max-w-2xl w-full bg-white shadow-2xl animate-scaleIn border-slate-200 my-auto">
             <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100 pb-4">
               <div>
                 <CardTitle className="text-base text-slate-900">Integration Snippets: {selectedOfferForCode.name}</CardTitle>
-                <p className="text-xs text-slate-500">Copy redirect URLs, JavaScript pixels, and S2S Postbacks.</p>
+                <p className="text-xs text-slate-500">Tracking URLs, JavaScript pixels, and S2S postbacks.</p>
               </div>
-              <button onClick={() => setSelectedOfferForCode(null)} className="p-1 text-slate-400 hover:text-slate-600 rounded">
+              <button
+                onClick={() => setSelectedOfferForCode(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+                aria-label="Close modal"
+              >
                 <X size={18} />
               </button>
             </CardHeader>
-            <CardContent className="space-y-6 pt-4 text-xs">
+            <CardContent className="space-y-5 pt-4 text-xs">
               {/* Domain Selector */}
               {domains.length > 0 && (
-                <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-lg flex items-center justify-between gap-3">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
-                    <Globe size={16} className="text-indigo-600 shrink-0" />
+                    <Globe size={16} className="text-slate-600 shrink-0" />
                     <div>
-                      <span className="font-bold text-slate-800 block text-xs">Multi-Domain Tracking Link Generator</span>
-                      <span className="text-[11px] text-slate-500">Select tracking domain to format all generated links:</span>
+                      <span className="font-semibold text-slate-800 block text-xs">Tracking Domain</span>
+                      <span className="text-[11px] text-slate-500">Select domain to format generated links:</span>
                     </div>
                   </div>
                   <Select
                     value={selectedDomain}
                     onChange={(e) => setSelectedDomain(e.target.value)}
                     options={[
-                      { value: "", label: `Default Server (${window.location.host})` },
+                      { value: "", label: `Default Host (${window.location.host})` },
                       ...domains.map(d => ({ value: d.domain, label: `${d.domain} ${d.isDefault ? '(Default)' : ''}` }))
                     ]}
                     className="w-56 text-xs font-mono bg-white"
@@ -639,133 +785,163 @@ export default function Offers() {
 
               {/* Redirect Link */}
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">1. Link Redirect URL (For Affiliates/Publishers)</label>
+                <label className="font-medium text-slate-700 block text-xs">1. Direct Tracking Link (For Affiliates/Publishers)</label>
                 <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                  <span className="font-mono flex-1 truncate text-slate-800">{getTrackingUrl(selectedOfferForCode._id)}</span>
+                  <span className="font-mono flex-1 truncate text-slate-800 text-xs">{getTrackingUrl(selectedOfferForCode._id)}</span>
                   <button
-                    onClick={() => copyToClipboard(getTrackingUrl(selectedOfferForCode._id), "link")}
-                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                    onClick={() => handleCopy(getTrackingUrl(selectedOfferForCode._id), "link")}
+                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-xs cursor-pointer"
                   >
-                    {copiedId === "link" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                    {copiedId === "link" ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Copy size={13} />} Copy
                   </button>
                 </div>
               </div>
 
               {/* JS Pixel Embed */}
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">2. Client-Side Encrypted JS Script (Stealth Obfuscated)</label>
+                <label className="font-medium text-slate-700 block text-xs">2. Client-Side JavaScript Pixel</label>
                 <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                  <span className="font-mono flex-1 truncate text-slate-800">{getScriptTag(selectedOfferForCode._id)}</span>
+                  <span className="font-mono flex-1 truncate text-slate-800 text-xs">{getScriptTag(selectedOfferForCode._id)}</span>
                   <button
-                    onClick={() => copyToClipboard(getScriptTag(selectedOfferForCode._id), "js")}
-                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                    onClick={() => handleCopy(getScriptTag(selectedOfferForCode._id), "js")}
+                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-xs cursor-pointer"
                   >
-                    {copiedId === "js" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                    {copiedId === "js" ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Copy size={13} />} Copy
                   </button>
                 </div>
               </div>
 
               {/* Image Pixel */}
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">3. 1x1 Image Pixel Tag (&lt;img&gt;)</label>
+                <label className="font-medium text-slate-700 block text-xs">3. Image Pixel Tag (&lt;img&gt;)</label>
                 <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                  <span className="font-mono flex-1 truncate text-slate-800">{getImagePixelTag(selectedOfferForCode._id)}</span>
+                  <span className="font-mono flex-1 truncate text-slate-800 text-xs">{getImagePixelTag(selectedOfferForCode._id)}</span>
                   <button
-                    onClick={() => copyToClipboard(getImagePixelTag(selectedOfferForCode._id), "img")}
-                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                    onClick={() => handleCopy(getImagePixelTag(selectedOfferForCode._id), "img")}
+                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-xs cursor-pointer"
                   >
-                    {copiedId === "img" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                    {copiedId === "img" ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Copy size={13} />} Copy
                   </button>
                 </div>
               </div>
 
-              {/* Iframe Pixel */}
+              {/* S2S Postback URL with Secret Masking */}
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">4. 1x1 Iframe Pixel Tag (&lt;iframe&gt;)</label>
-                <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                  <span className="font-mono flex-1 truncate text-slate-800">{getIframePixelTag(selectedOfferForCode._id)}</span>
+                <div className="flex items-center justify-between">
+                  <label className="font-medium text-slate-700 block text-xs">4. Server-to-Server (S2S) Postback URL</label>
                   <button
-                    onClick={() => copyToClipboard(getIframePixelTag(selectedOfferForCode._id), "iframe")}
-                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                    type="button"
+                    onClick={() => setShowSecret(!showSecret)}
+                    className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 cursor-pointer"
+                    aria-label={showSecret ? "Hide secret token" : "Show secret token"}
                   >
-                    {copiedId === "iframe" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                    {showSecret ? <EyeOff size={13} /> : <Eye size={13} />}
+                    <span>{showSecret ? "Hide secret" : "Show secret"}</span>
                   </button>
                 </div>
-              </div>
-
-              {/* S2S Postback URL */}
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700 uppercase tracking-wider block text-[10px]">5. Server-to-Server (S2S) Postback URL (For Conversions)</label>
                 <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                  <span className="font-mono flex-1 truncate text-indigo-700">{getPostbackUrl(selectedOfferForCode._id)}</span>
+                  <span className="font-mono flex-1 truncate text-slate-800 text-xs">
+                    {showSecret
+                      ? getPostbackUrl(selectedOfferForCode._id)
+                      : getPostbackUrl(selectedOfferForCode._id).replace(/token=[^&]+/, "token=••••••••••••")}
+                  </span>
                   <button
-                    onClick={() => copyToClipboard(getPostbackUrl(selectedOfferForCode._id), "postback")}
-                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-[11px]"
+                    onClick={() => handleCopy(getPostbackUrl(selectedOfferForCode._id), "postback")}
+                    className="p-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-md font-semibold flex items-center gap-1 text-xs cursor-pointer"
                   >
-                    {copiedId === "postback" ? <CheckCircle2 size={14} className="text-emerald-600" /> : <Copy size={14} />} Copy
+                    {copiedId === "postback" ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Copy size={13} />} Copy
                   </button>
                 </div>
               </div>
             </CardContent>
           </Card>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Campaign Create/Edit Centered Multi-Step Modal */}
-      {showDrawer && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 sm:p-6 animate-fadeIn">
-          <div className="bg-white w-full max-w-4xl h-[85vh] max-h-[820px] flex flex-col rounded-2xl shadow-2xl border border-slate-100 overflow-hidden animate-scaleIn">
+      {/* Campaign Form Drawer/Modal */}
+      {showDrawer && createPortal(
+        <div
+          className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-fadeIn"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) handleCloseDrawer();
+          }}
+        >
+          <div className="relative bg-white w-full max-w-4xl max-h-[90vh] my-auto flex flex-col rounded-2xl shadow-2xl border border-slate-200/90 overflow-hidden animate-scaleIn">
             
             {/* Modal Header */}
-            <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+            <div className="px-6 py-4 border-b border-slate-200/80 flex items-center justify-between bg-slate-50/70 shrink-0">
               <div>
-                <h3 className="font-bold text-xl text-slate-900 flex items-center gap-2">
-                  {editingOfferId ? "Edit Campaign" : "Create New Campaign"}
+                <h3 className="font-semibold text-lg text-slate-900">
+                  {editingOfferId ? "Edit Campaign" : "New Campaign"}
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">Set up your campaign link, landing pages, tracking rules, and payouts.</p>
+                <p className="text-xs text-slate-500 mt-0.5">Configure tracking links, rotation rules, and targeting criteria.</p>
               </div>
               <button 
-                onClick={closeDrawer} 
-                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                onClick={handleCloseDrawer} 
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-lg transition-colors cursor-pointer"
+                aria-label="Close campaign form"
               >
                 <X size={20} />
               </button>
             </div>
 
             {/* Step Tabs Indicator */}
-            <div className="flex border-b border-slate-200/80 text-xs font-medium text-slate-500 bg-white px-6">
-              {[
-                { step: 1, label: "1. Setup & Link" },
-                { step: 2, label: "2. Pages & Events" },
-                { step: 3, label: "3. Caps & Protection" },
-                { step: 4, label: "4. Audience & Rules" },
-              ].map(({ step, label }) => (
-                <button
-                  key={step}
-                  type="button"
-                  onClick={() => setCurrentStep(step)}
-                  className={`py-3.5 px-4 border-b-2 font-bold text-xs whitespace-nowrap transition-all cursor-pointer ${
-                    currentStep === step 
-                      ? "border-indigo-600 text-indigo-600" 
-                      : "border-transparent text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="bg-slate-50/80 px-6 py-3 border-b border-slate-200/80 shrink-0">
+              <div className="grid grid-cols-4 gap-2 bg-slate-200/70 p-1 rounded-xl">
+                {[
+                  { step: 1, full: "1. Setup & Links", short: "1. Setup" },
+                  { step: 2, full: "2. Rotation & Events", short: "2. Rotation" },
+                  { step: 3, full: "3. Caps & Schedule", short: "3. Schedule" },
+                  { step: 4, full: "4. Audience & Targeting", short: "4. Audience" },
+                ].map(({ step, full, short }) => {
+                  const isActive = currentStep === step;
+                  const isPassed = currentStep > step;
+                  return (
+                    <button
+                      key={step}
+                      type="button"
+                      onClick={() => setCurrentStep(step)}
+                      className={`py-2 px-2 sm:px-3 rounded-lg text-xs font-medium transition-all text-center truncate cursor-pointer ${
+                        isActive
+                          ? "bg-white text-slate-900 shadow-xs font-semibold border border-slate-200/80"
+                          : isPassed
+                          ? "text-slate-700 hover:bg-white/60 hover:text-slate-900"
+                          : "text-slate-500 hover:bg-white/40 hover:text-slate-700"
+                      }`}
+                    >
+                      <span className="hidden md:inline">{full}</span>
+                      <span className="md:hidden">{short}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Form Content Body */}
-            <form onSubmit={handleCreateOrUpdate} className="flex-1 overflow-y-auto p-6 space-y-6">
-              
-              {/* STEP 1: SETUP & LINK */}
-              {currentStep === 1 && (
+            {/* Form Content Body: onKeyDown prevents early submission on Enter */}
+            <form
+              onSubmit={handleCreateOrUpdate}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+                  e.preventDefault();
+                }
+              }}
+              className="flex flex-col flex-1 min-h-0"
+            >
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                
+                {/* STEP 1: SETUP & LINK */}
+                {currentStep === 1 && (
                 <div className="space-y-5">
                   <Input
                     label="Campaign Name"
                     placeholder="e.g. Winter Sale Promo 2026"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, name: e.target.value });
+                      if (formErrors.name) setFormErrors({ ...formErrors, name: undefined });
+                    }}
+                    error={formErrors.name}
                     required
                   />
                   
@@ -774,265 +950,255 @@ export default function Offers() {
                       label="Main Landing Page URL"
                       placeholder="https://advertiser.com/landing?pub={pub_id}&sub1={sub_id1}"
                       value={formData.destinationUrl}
-                      onChange={(e) => setFormData({ ...formData, destinationUrl: e.target.value })}
+                      onChange={(e) => {
+                        handleDestinationUrlChange(e.target.value);
+                        if (formErrors.destinationUrl) setFormErrors({ ...formErrors, destinationUrl: undefined });
+                      }}
+                      error={formErrors.destinationUrl}
                       required
                     />
                     <Input
-                      label="Backup URL (For Blocked Visitors)"
+                      label="Fallback URL (For Filtered Visitors)"
                       placeholder="https://fallback.com/backup"
                       value={formData.fallbackUrl}
                       onChange={(e) => setFormData({ ...formData, fallbackUrl: e.target.value })}
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Input
-                      label="Advertiser Revenue (₹)"
+                      label="Default Revenue per Conversion (₹)"
                       type="number"
                       step="0.01"
+                      placeholder="12.00"
                       value={formData.revenue}
                       onChange={(e) => setFormData({ ...formData, revenue: Number(e.target.value) })}
                     />
                     <Input
-                      label="Publisher Payout (₹)"
+                      label="Default Publisher Payout (₹)"
                       type="number"
                       step="0.01"
+                      placeholder="4.50"
                       value={formData.payout}
                       onChange={(e) => setFormData({ ...formData, payout: Number(e.target.value) })}
                     />
                   </div>
 
-                  <div className="border border-indigo-100 bg-indigo-50/40 p-4 rounded-xl space-y-3">
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                      <label className="font-bold text-slate-900 text-xs uppercase tracking-wider">Link Redirect Method</label>
-                    </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Select
-                      label=""
+                      label="Redirect Method"
                       value={formData.redirectType}
                       onChange={(e) => setFormData({ ...formData, redirectType: e.target.value as any })}
                       options={[
-                        { value: "302", label: "Standard (Direct 302 - Strips Referrer via Policy Header)" },
-                        { value: "307", label: "Strict Direct (HTTP 307 - Preserves Request Method)" },
-                        { value: "meta", label: "Hide Source Domain (Meta Refresh)" },
-                        { value: "double_meta", label: "Complete Anonymous (Blank Referrer)" },
-                        { value: "custom_referrer", label: "Custom Referrer Brand" }
+                        { value: "302", label: "302 Standard Redirect" },
+                        { value: "307", label: "307 Temporary Redirect" },
+                        { value: "meta", label: "Meta Refresh / Referrer Stripper" },
+                        { value: "double_meta", label: "Double Meta Refresh (Blank Referrer)" },
+                        { value: "custom_referrer", label: "Custom Referrer Spoof" }
                       ]}
                     />
-
-                    {formData.redirectType === "custom_referrer" && (
-                      <Input
-                        label="Custom Referrer Brand Domain / URL"
-                        placeholder="https://mycustombrand.com"
-                        value={formData.customReferrerUrl}
-                        onChange={(e) => setFormData({ ...formData, customReferrerUrl: e.target.value })}
-                      />
-                    )}
+                    <Select
+                      label="Action on Filtered / Blocked Traffic"
+                      value={formData.actionOnFilter}
+                      onChange={(e) => setFormData({ ...formData, actionOnFilter: e.target.value as any })}
+                      options={[
+                        { value: "redirect", label: "Redirect to Fallback URL" },
+                        { value: "block", label: "HTTP 403 Forbidden" },
+                        { value: "drop", label: "Drop Silently (Blank Screen)" },
+                        { value: "log", label: "Log & Allow Through" }
+                      ]}
+                    />
                   </div>
 
-                  <Select
-                    label="Action for Blocked Visitors"
-                    value={formData.actionOnFilter}
-                    onChange={(e) => setFormData({ ...formData, actionOnFilter: e.target.value as any })}
-                    options={[
-                      { value: "redirect", label: "Send to Backup URL" },
-                      { value: "block", label: "Show Access Denied (403)" },
-                      { value: "log", label: "Log Click & Allow Through" },
-                      { value: "drop", label: "Drop Request Silently" }
-                    ]}
-                  />
+                  {formData.redirectType === "custom_referrer" && (
+                    <Input
+                      label="Custom Spoofed Referrer URL"
+                      placeholder="https://google.com/"
+                      value={formData.customReferrerUrl}
+                      onChange={(e) => setFormData({ ...formData, customReferrerUrl: e.target.value })}
+                    />
+                  )}
                 </div>
               )}
 
               {/* STEP 2: PAGES & EVENTS */}
               {currentStep === 2 && (
                 <div className="space-y-6">
-                  {/* Landing Page Rotation */}
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <Shuffle className="w-4 h-4 text-indigo-600" />
+                  {/* Landing page rotation */}
+                  <div className="border border-slate-200 rounded-xl p-5 bg-slate-50/50 space-y-4">
+                    <div className="flex items-center justify-between">
                       <div>
-                        <label className="font-bold text-slate-900 text-xs uppercase tracking-wider block">Landing Page Rotation & Split Testing</label>
-                        <p className="text-xs text-slate-500">Distribute visitors across multiple landing pages based on percentage weights (e.g. 50% Page A, 50% Page B).</p>
+                        <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                          <Shuffle size={15} className="text-slate-700" />
+                          Multi-Link Landing Page Rotation (SWRR)
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Distribute clicks across multiple landing pages smoothly using Smooth Weighted Round-Robin.
+                        </p>
                       </div>
+                      {formData.trackingUrls.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleEqualizeTrackingUrls}
+                          className="text-xs font-medium bg-white"
+                        >
+                          Equalize Weights
+                        </Button>
+                      )}
                     </div>
 
-                    <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                      <span className="font-semibold text-slate-700 text-xs block">Add Additional Landing Page</span>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Landing Page List */}
+                    <div className="space-y-2">
+                      {formData.trackingUrls.map((item) => (
+                        <div
+                          key={item.id}
+                          className={`flex items-center gap-3 p-3 bg-white border rounded-lg transition-colors ${
+                            item.status === "active" ? "border-slate-200" : "border-slate-200 opacity-60 bg-slate-50"
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-xs text-slate-800">{item.name}</span>
+                              {item.id === "primary" && (
+                                <Badge variant="primary" className="text-[10px] py-0 px-1.5">Primary</Badge>
+                              )}
+                              <Badge variant={item.status === "active" ? "success" : "warning"} className="text-[10px] py-0 px-1.5">
+                                {item.status}
+                              </Badge>
+                            </div>
+                            <div className="text-xs font-mono text-slate-500 truncate mt-0.5">{item.url}</div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs text-slate-500">Weight:</span>
+                              <input
+                                type="number"
+                                min="1"
+                                max="100"
+                                value={item.weight}
+                                onChange={(e) => handleUpdateTrackingUrlWeight(item.id, Number(e.target.value))}
+                                className="w-14 px-2 py-1 text-xs border border-slate-200 rounded font-bold text-center bg-slate-50 focus:bg-white outline-none"
+                              />
+                              <span className="text-xs text-slate-400">%</span>
+                            </div>
+
+                            {item.id !== "primary" && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveTrackingUrl(item.id)}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                                aria-label={`Remove landing page ${item.name}`}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Add rotation page row */}
+                    <div className="pt-2 border-t border-slate-200">
+                      <span className="text-xs font-semibold text-slate-700 block mb-2">Add Another Landing Page</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                         <Input
-                          label="Page Label"
-                          placeholder="e.g. Promo Landing Page B"
+                          placeholder="Page Label (e.g. Variant B)"
                           value={newTrackingUrl.name}
                           onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, name: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleAddTrackingUrl();
+                            }
+                          }}
                         />
-                        <Input
-                          label="Destination URL"
-                          placeholder="https://advertiser.com/landing-b?pub={pub_id}"
-                          value={newTrackingUrl.url}
-                          onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, url: e.target.value })}
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3 items-end">
-                        <Input
-                          label="Weight Percentage (1 - 100)"
-                          type="number"
-                          min="1"
-                          max="100"
-                          value={newTrackingUrl.weight}
-                          onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, weight: Number(e.target.value) })}
-                        />
-                        <Button type="button" onClick={handleAddTrackingUrl} className="bg-indigo-600 hover:bg-indigo-500 text-xs gap-1 cursor-pointer">
-                          <Plus size={14} /> Add Rotation Page
+                        <div className="sm:col-span-2">
+                          <Input
+                            placeholder="Destination URL (https://...)"
+                            value={newTrackingUrl.url}
+                            onChange={(e) => setNewTrackingUrl({ ...newTrackingUrl, url: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleAddTrackingUrl();
+                              }
+                            }}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          onClick={handleAddTrackingUrl}
+                          className="bg-slate-900 text-xs font-semibold h-full"
+                        >
+                          <Plus size={14} /> Add Page
                         </Button>
                       </div>
                     </div>
-
-                    {formData.trackingUrls.length > 0 ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between px-1">
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className="font-semibold text-slate-700">Total Configured Weight:</span>
-                            {(() => {
-                              const totalWeight = formData.trackingUrls.reduce((sum, u) => sum + (Number(u.weight) || 0), 0);
-                              return (
-                                <>
-                                  <Badge 
-                                    variant={totalWeight === 100 ? "success" : "warning"}
-                                    className={totalWeight === 100 ? "bg-emerald-50 text-emerald-700 border-emerald-200 font-bold" : "bg-amber-50 text-amber-700 border-amber-200 font-bold"}
-                                  >
-                                    {totalWeight}%
-                                  </Badge>
-                                  {totalWeight !== 100 && (
-                                    <span className="text-[11px] text-amber-600 hidden sm:inline">(Auto-normalizes proportionally)</span>
-                                  )}
-                                </>
-                              );
-                            })()}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleEqualizeTrackingUrls}
-                            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1 border border-indigo-200"
-                            title="Split 100% equally among all rotation links"
-                          >
-                            <Shuffle size={12} /> Auto-Split Equally
-                          </button>
-                        </div>
-
-                        <div className="space-y-2 border border-slate-200 rounded-xl overflow-hidden text-xs">
-                          {formData.trackingUrls.map((item) => (
-                            <div key={item.id} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100 gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="font-bold text-slate-900">{item.name}</div>
-                                <div className="text-slate-500 font-mono truncate text-[11px] mt-0.5">{item.url}</div>
-                              </div>
-
-                              {/* Interactive Weight Stepper (+ / -) & Input */}
-                              <div className="flex items-center gap-2 shrink-0">
-                                <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-0.5 shadow-xs">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleStepTrackingUrlWeight(item.id, -5)}
-                                    className="w-6 h-6 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-white rounded transition-colors font-bold text-sm cursor-pointer"
-                                    title="Decrease 5%"
-                                  >
-                                    –
-                                  </button>
-                                  <div className="relative flex items-center px-1">
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      max="100"
-                                      value={item.weight}
-                                      onChange={(e) => handleUpdateTrackingUrlWeight(item.id, Number(e.target.value))}
-                                      className="w-10 text-center font-bold text-xs text-indigo-700 bg-transparent focus:outline-none focus:bg-white rounded py-0.5"
-                                    />
-                                    <span className="text-[10px] text-slate-400 font-bold">%</span>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleStepTrackingUrlWeight(item.id, 5)}
-                                    className="w-6 h-6 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-white rounded transition-colors font-bold text-sm cursor-pointer"
-                                    title="Increase 5%"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveTrackingUrl(item.id)}
-                                  className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0 cursor-pointer transition-colors"
-                                  title="Delete Link"
-                                >
-                                  <Trash2 size={15} />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                        No additional rotation pages added. All visitors will go to the Main Landing Page URL.
-                      </div>
-                    )}
                   </div>
 
-                  {/* Custom Conversion Events */}
-                  <div className="border-t border-slate-200 pt-5 space-y-4">
-                    <div className="flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-indigo-600" />
-                      <div>
-                        <label className="font-bold text-slate-900 text-xs uppercase tracking-wider block">Custom Conversion Events & Payouts</label>
-                        <p className="text-xs text-slate-500">Assign specific payout amounts for different user actions (e.g. Lead, Sale, App Install).</p>
-                      </div>
+                  {/* Multi-Event Payouts */}
+                  <div className="border border-slate-200 rounded-xl p-5 bg-slate-50/50 space-y-4">
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-900">Custom Conversion Events</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Define distinct payouts for secondary actions like lead, deposit, or purchase.
+                      </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                       <Input
-                        label="Event Name"
-                        placeholder="e.g. signup, sale, install"
+                        placeholder="Event (e.g. deposit)"
                         value={newEvent.eventName}
                         onChange={(e) => setNewEvent({ ...newEvent, eventName: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddEvent();
+                          }
+                        }}
                       />
                       <Input
-                        label="Revenue (₹)"
                         type="number"
-                        step="0.01"
-                        value={newEvent.revenue}
+                        placeholder="Revenue (₹)"
+                        value={newEvent.revenue || ""}
                         onChange={(e) => setNewEvent({ ...newEvent, revenue: Number(e.target.value) })}
                       />
                       <Input
-                        label="Payout (₹)"
                         type="number"
-                        step="0.01"
-                        value={newEvent.payout}
+                        placeholder="Payout (₹)"
+                        value={newEvent.payout || ""}
                         onChange={(e) => setNewEvent({ ...newEvent, payout: Number(e.target.value) })}
                       />
+                      <Button
+                        type="button"
+                        onClick={handleAddEvent}
+                        className="bg-slate-900 text-xs font-semibold"
+                      >
+                        <Plus size={14} /> Add Event
+                      </Button>
                     </div>
-                    <Button type="button" onClick={handleAddEvent} variant="outline" className="w-full text-xs gap-1 border-indigo-200 text-indigo-700 hover:bg-indigo-50 cursor-pointer">
-                      <Plus size={14} /> Add Event Payout Rule
-                    </Button>
 
                     {formData.eventsList.length > 0 && (
-                      <div className="space-y-2 border border-slate-200 rounded-xl overflow-hidden text-xs">
+                      <div className="border border-slate-200 rounded-lg overflow-hidden bg-white divide-y divide-slate-100">
                         {formData.eventsList.map((ev, i) => (
-                          <div key={i} className="flex justify-between items-center p-3 bg-white border-b last:border-0 border-slate-100">
-                            <div className="font-bold text-slate-800 flex items-center gap-3">
-                              <Badge variant="primary" className="bg-indigo-100 text-indigo-800 font-mono text-[11px]">
-                                &event={ev.eventName}
-                              </Badge>
+                          <div key={i} className="flex justify-between items-center p-3 text-xs">
+                            <div className="flex items-center gap-3 font-medium text-slate-800">
+                              <span className="font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-700">
+                                event={ev.eventName}
+                              </span>
                               <span>Revenue: <b>₹{ev.revenue}</b></span>
                               <span>Payout: <b>₹{ev.payout}</b></span>
                             </div>
                             <button
                               type="button"
                               onClick={() => handleRemoveEvent(i)}
-                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0 cursor-pointer"
+                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                              aria-label={`Remove event ${ev.eventName}`}
                             >
-                              <Trash2 size={15} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         ))}
@@ -1045,19 +1211,28 @@ export default function Offers() {
               {/* STEP 3: CAPS & PROTECTION */}
               {currentStep === 3 && (
                 <div className="space-y-5">
-                  <div className="border border-indigo-100 bg-indigo-50/50 p-4 rounded-xl space-y-3">
+                  <div className="border border-slate-200 bg-slate-50/50 p-4 rounded-xl space-y-3">
+                    <Switch
+                      checked={formData.blockBots}
+                      onChange={(val) => setFormData({ ...formData, blockBots: val })}
+                      label="Automatic Bot & Crawler Protection"
+                      description="Filter known automated scrapers and search bots to protect landing page conversion metrics."
+                    />
+                  </div>
+
+                  <div className="border border-slate-200 bg-slate-50/50 p-4 rounded-xl space-y-3">
                     <Switch
                       checked={formData.sessionCheckEnabled}
                       onChange={(val) => setFormData({ ...formData, sessionCheckEnabled: val })}
-                      label="Require Session Cookie (Session Validation)"
-                      description="Only count conversions from visitors who have an active, valid tracking cookie."
+                      label="Require Valid Session Cookie"
+                      description="Only attribute conversions from visitors who possess a valid tracking session cookie."
                     />
 
                     {formData.sessionCheckEnabled && (
                       <Input
                         label="Session Lifetime (Minutes)"
                         type="number"
-                        placeholder="1440 (Default 24 Hours)"
+                        placeholder="1440 (24 Hours)"
                         value={formData.sessionTtlMinutes}
                         onChange={(e) => setFormData({ ...formData, sessionTtlMinutes: Number(e.target.value) })}
                       />
@@ -1066,13 +1241,13 @@ export default function Offers() {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Input
-                      label="Daily Limit (Max Clicks per Day, 0 = Unlimited)"
+                      label="Daily Cap (0 = Unlimited)"
                       type="number"
                       value={formData.dailyCap}
                       onChange={(e) => setFormData({ ...formData, dailyCap: Number(e.target.value) })}
                     />
                     <Input
-                      label="Hourly Limit (Max Clicks per Hour, 0 = Unlimited)"
+                      label="Hourly Cap (0 = Unlimited)"
                       type="number"
                       value={formData.hourlyCap}
                       onChange={(e) => setFormData({ ...formData, hourlyCap: Number(e.target.value) })}
@@ -1080,48 +1255,125 @@ export default function Offers() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Input
-                      label="Campaign Start Date/Time"
-                      type="datetime-local"
-                      value={formData.startDate}
-                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                    />
-                    <Input
-                      label="Campaign End Date/Time"
-                      type="datetime-local"
-                      value={formData.endDate}
-                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                    />
+                    <div>
+                      <label className="text-xs font-medium text-slate-700 block mb-1.5">Campaign Start (Local Time)</label>
+                      <input
+                        type="datetime-local"
+                        value={formData.startDate}
+                        onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                        className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none focus:bg-white focus:border-slate-800 transition-all text-slate-700"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-700 block mb-1.5">Campaign End (Local Time)</label>
+                      <input
+                        type="datetime-local"
+                        value={formData.endDate}
+                        onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                        className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg outline-none focus:bg-white focus:border-slate-800 transition-all text-slate-700"
+                      />
+                    </div>
                   </div>
 
                   <Input
-                    label="Repeat Click Protection (Minutes)"
+                    label="Duplicate Click Guard Window (Minutes, 0 = Allow All)"
                     type="number"
-                    placeholder="e.g. 15 (Ignores repeat clicks from same IP within 15 mins)"
                     value={formData.duplicateWindowMinutes}
                     onChange={(e) => setFormData({ ...formData, duplicateWindowMinutes: Number(e.target.value) })}
                   />
                 </div>
               )}
 
-              {/* STEP 4: AUDIENCE & RULES */}
+              {/* STEP 4: AUDIENCE & TARGETING */}
               {currentStep === 4 && (
-                <div className="space-y-5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Input
-                      label="Allowed Countries (CSV)"
-                      placeholder="e.g. US, CA, GB (Leave blank for ALL)"
+                <div className="space-y-6">
+                  {/* Country Selector */}
+                  <div className="space-y-1.5">
+                    <CountrySelect
                       value={formData.geoTargeting}
-                      onChange={(e) => setFormData({ ...formData, geoTargeting: e.target.value })}
-                    />
-                    <Input
-                      label="Allowed Cities (CSV)"
-                      placeholder="e.g. NEW YORK, LONDON"
-                      value={formData.cityTargeting}
-                      onChange={(e) => setFormData({ ...formData, cityTargeting: e.target.value })}
+                      selected={formData.geoTargeting}
+                      onChange={(codes) => setFormData({ ...formData, geoTargeting: codes })}
                     />
                   </div>
 
+                  {/* City Selector */}
+                  <div className="space-y-2 border border-slate-200 rounded-xl p-4 bg-slate-50/40">
+                    <label className="text-xs font-medium text-slate-700 block">City Targeting</label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Add city (e.g. London, Singapore)..."
+                        value={cityInput}
+                        onChange={(e) => setCityInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === ",") {
+                            e.preventDefault();
+                            if (cityInput.trim()) {
+                              setFormData(prev => ({ ...prev, cityTargeting: addItemToList(prev.cityTargeting, cityInput) }));
+                              setCityInput("");
+                            }
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          if (cityInput.trim()) {
+                            setFormData(prev => ({ ...prev, cityTargeting: addItemToList(prev.cityTargeting, cityInput) }));
+                            setCityInput("");
+                          }
+                        }}
+                        className="bg-slate-900 text-xs px-4"
+                      >
+                        Add
+                      </Button>
+                    </div>
+
+                    {/* Quick select popular cities */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-xs font-medium text-slate-500 mr-1">Suggestions:</span>
+                      {POPULAR_CITIES.map((c) => {
+                        const inList = getTargetingList(formData.cityTargeting).some(x => x.toUpperCase() === c.toUpperCase());
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, cityTargeting: toggleItemInList(prev.cityTargeting, c) }))}
+                            className={`text-xs px-2 py-0.5 rounded border transition-colors cursor-pointer ${
+                              inList
+                                ? "bg-slate-900 text-white border-slate-900 font-medium"
+                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                            }`}
+                          >
+                            {c} {inList ? "✓" : "+"}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Selected city badges */}
+                    {getTargetingList(formData.cityTargeting).length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-200">
+                        {getTargetingList(formData.cityTargeting).map((city) => (
+                          <span
+                            key={city}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-900 text-white"
+                          >
+                            {city}
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({ ...prev, cityTargeting: removeItemFromList(prev.cityTargeting, city) }))}
+                              className="hover:text-rose-300 cursor-pointer"
+                              aria-label={`Remove ${city}`}
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Device and OS */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <Select
                       label="Target Device"
@@ -1146,205 +1398,170 @@ export default function Offers() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Input
-                      label="Allowed Browsers (CSV)"
-                      placeholder="e.g. CHROME, SAFARI"
-                      value={formData.browserTargeting}
-                      onChange={(e) => setFormData({ ...formData, browserTargeting: e.target.value })}
-                    />
-                    <Input
-                      label="Allowed Internet Providers (CSV)"
-                      placeholder="e.g. VERIZON, COMCAST"
-                      value={formData.ispTargeting}
-                      onChange={(e) => setFormData({ ...formData, ispTargeting: e.target.value })}
-                    />
-                  </div>
-
-                  {/* Pixel Trigger Controls */}
-                  <div className="border-t border-slate-200 pt-5 space-y-4">
-                    <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Page Pixel & Frequency Settings</h4>
-                    
-                    <Input
-                      label="Specific Webpages Only (URL Path Whitelist CSV)"
-                      placeholder="e.g. /checkout, /thank-you (Leave blank for ALL pages)"
-                      value={formData.targetPages}
-                      onChange={(e) => setFormData({ ...formData, targetPages: e.target.value })}
-                    />
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <Input
-                        label="Wait Time Before Firing (ms)"
-                        type="number"
-                        placeholder="0 (Instant)"
-                        value={formData.triggerDelayMs}
-                        onChange={(e) => setFormData({ ...formData, triggerDelayMs: Number(e.target.value) })}
-                      />
-                      <Input
-                        label="Repeat Fire Interval (ms)"
-                        type="number"
-                        placeholder="0 (Disabled)"
-                        value={formData.triggerIntervalMs}
-                        onChange={(e) => setFormData({ ...formData, triggerIntervalMs: Number(e.target.value) })}
-                      />
-                      <Input
-                        label="Maximum Times to Fire"
-                        type="number"
-                        placeholder="0 (Unlimited)"
-                        value={formData.triggerRepeatCount}
-                        onChange={(e) => setFormData({ ...formData, triggerRepeatCount: Number(e.target.value) })}
-                      />
+                  {/* Browser Selector */}
+                  <div className="space-y-2 border border-slate-200 rounded-xl p-4 bg-slate-50/40">
+                    <label className="text-xs font-medium text-slate-700 block">Allowed Browsers</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {POPULAR_BROWSERS.map((b) => {
+                        const inList = getTargetingList(formData.browserTargeting).some(x => x.toUpperCase() === b.toUpperCase());
+                        return (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, browserTargeting: toggleItemInList(prev.browserTargeting, b) }))}
+                            className={`text-xs px-2.5 py-1 rounded-md border font-medium transition-colors cursor-pointer ${
+                              inList
+                                ? "bg-slate-900 text-white border-slate-900"
+                                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                            }`}
+                          >
+                            {b} {inList ? "✓" : "+"}
+                          </button>
+                        );
+                      })}
                     </div>
-
-                    <Select
-                      label="How Often Pixel Fires"
-                      value={formData.frequencyCap}
-                      onChange={(e) => setFormData({ ...formData, frequencyCap: e.target.value as any })}
-                      options={[
-                        { value: "unlimited", label: "Every Page Load" },
-                        { value: "once_per_session", label: "Once per Visit (Session)" },
-                        { value: "once_per_user", label: "Once per Person (Forever)" }
-                      ]}
-                    />
-                  </div>
-
-                  {/* Weighted Custom Page Rules */}
-                  <div className="border-t border-slate-200 pt-5 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                        <Shuffle size={13} className="text-indigo-500" />
-                        Custom Page Rules
-                      </h4>
-                      <span className="text-[10px] text-slate-400">{(formData.targetPageRules || []).length} rule{(formData.targetPageRules || []).length !== 1 ? "s" : ""}</span>
-                    </div>
-                    <p className="text-[11px] text-slate-500">Target specific pages with weights and custom delay overrides — e.g. 60% weight on <code>/checkout</code>, 40% weight on <code>/thank-you</code>.</p>
-
-                    {/* Existing rules list */}
-                    {(formData.targetPageRules || []).length > 0 && (
-                      <div className="space-y-2">
-                        {(formData.targetPageRules || []).map((rule) => (
-                          <div key={rule.id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <code className="text-xs font-mono font-bold text-indigo-700 truncate">{rule.path}</code>
-                                <span className="text-[10px] text-slate-400 shrink-0">{rule.matchType}</span>
-                              </div>
-                              <div className="flex items-center gap-3 mt-0.5">
-                                <span className="text-[10px] text-slate-500">Weight: <b>{rule.weight}%</b></span>
-                                <span className="text-[10px] text-slate-500">Delay: <b>{rule.delayMs}ms</b></span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => setFormData(prev => ({
-                                  ...prev,
-                                  targetPageRules: (prev.targetPageRules || []).map(r =>
-                                    r.id === rule.id ? { ...r, status: r.status === "active" ? "paused" : "active" } : r
-                                  )
-                                }))}
-                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full cursor-pointer ${rule.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
-                              >{rule.status === "active" ? "Active" : "Paused"}</button>
-                              <button
-                                type="button"
-                                onClick={() => setFormData(prev => ({
-                                  ...prev,
-                                  targetPageRules: (prev.targetPageRules || []).filter(r => r.id !== rule.id)
-                                }))}
-                                className="text-slate-400 hover:text-rose-500 transition-colors cursor-pointer"
-                              ><Trash2 size={13} /></button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Add new rule row */}
-                    <div className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-4 space-y-3">
-                      <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider">Add Page Rule</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <Input
-                          label="URL Path"
-                          placeholder="/checkout"
-                          value={newPageRule.path}
-                          onChange={(e) => setNewPageRule(p => ({ ...p, path: e.target.value }))}
-                        />
-                        <Select
-                          label="Match Type"
-                          value={newPageRule.matchType}
-                          onChange={(e) => setNewPageRule(p => ({ ...p, matchType: e.target.value as any }))}
-                          options={[
-                            { value: "contains", label: "Contains (default)" },
-                            { value: "exact", label: "Exact match" },
-                            { value: "startsWith", label: "Starts with" }
-                          ]}
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <Input
-                          label="Weight (%)"
-                          type="number"
-                          placeholder="50"
-                          value={newPageRule.weight}
-                          onChange={(e) => setNewPageRule(p => ({ ...p, weight: Number(e.target.value) }))}
-                        />
-                        <Input
-                          label="Delay Override (ms)"
-                          type="number"
-                          placeholder="0 (use global)"
-                          value={newPageRule.delayMs}
-                          onChange={(e) => setNewPageRule(p => ({ ...p, delayMs: Number(e.target.value) }))}
-                        />
-                      </div>
+                    <div className="flex gap-2 pt-2">
+                      <Input
+                        placeholder="Add other browser name..."
+                        value={browserInput}
+                        onChange={(e) => setBrowserInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (browserInput.trim()) {
+                              setFormData(prev => ({ ...prev, browserTargeting: addItemToList(prev.browserTargeting, browserInput) }));
+                              setBrowserInput("");
+                            }
+                          }
+                        }}
+                      />
                       <Button
                         type="button"
-                        variant="outline"
-                        className="w-full gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 cursor-pointer"
                         onClick={() => {
-                          if (!newPageRule.path.trim()) return;
-                          const rule: TargetPageRule = {
-                            id: "pr-" + Math.random().toString(36).substring(2, 8),
-                            path: newPageRule.path.trim(),
-                            weight: Number(newPageRule.weight) || 50,
-                            delayMs: Number(newPageRule.delayMs) || 0,
-                            matchType: newPageRule.matchType,
-                            status: "active"
-                          };
-                          setFormData(prev => ({ ...prev, targetPageRules: [...(prev.targetPageRules || []), rule] }));
-                          setNewPageRule({ path: "", weight: 50, delayMs: 0, matchType: "contains", status: "active" });
+                          if (browserInput.trim()) {
+                            setFormData(prev => ({ ...prev, browserTargeting: addItemToList(prev.browserTargeting, browserInput) }));
+                            setBrowserInput("");
+                          }
                         }}
+                        className="bg-slate-900 text-xs px-4"
                       >
-                        <Plus size={14} /> Add Page Rule
+                        Add
                       </Button>
                     </div>
                   </div>
+
+                  {/* ISP Selector */}
+                  <div className="space-y-2 border border-slate-200 rounded-xl p-4 bg-slate-50/40">
+                    <label className="text-xs font-medium text-slate-700 block">Allowed Internet Service Providers (ISP)</label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Add ISP name (e.g. Comcast, Jio)..."
+                        value={ispInput}
+                        onChange={(e) => setIspInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (ispInput.trim()) {
+                              setFormData(prev => ({ ...prev, ispTargeting: addItemToList(prev.ispTargeting, ispInput) }));
+                              setIspInput("");
+                            }
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          if (ispInput.trim()) {
+                            setFormData(prev => ({ ...prev, ispTargeting: addItemToList(prev.ispTargeting, ispInput) }));
+                            setIspInput("");
+                          }
+                        }}
+                        className="bg-slate-900 text-xs px-4"
+                      >
+                        Add
+                      </Button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-xs font-medium text-slate-500 mr-1">Suggestions:</span>
+                      {POPULAR_ISPS.map((isp) => {
+                        const inList = getTargetingList(formData.ispTargeting).some(x => x.toUpperCase() === isp.toUpperCase());
+                        return (
+                          <button
+                            key={isp}
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, ispTargeting: toggleItemInList(prev.ispTargeting, isp) }))}
+                            className={`text-xs px-2 py-0.5 rounded border transition-colors cursor-pointer ${
+                              inList
+                                ? "bg-slate-900 text-white border-slate-900 font-medium"
+                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                            }`}
+                          >
+                            {isp} {inList ? "✓" : "+"}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {getTargetingList(formData.ispTargeting).length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-200">
+                        {getTargetingList(formData.ispTargeting).map((isp) => (
+                          <span
+                            key={isp}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-900 text-white"
+                          >
+                            {isp}
+                            <button
+                              type="button"
+                              onClick={() => setFormData(prev => ({ ...prev, ispTargeting: removeItemFromList(prev.ispTargeting, isp) }))}
+                              className="hover:text-rose-300 cursor-pointer"
+                              aria-label={`Remove ${isp}`}
+                            >
+                              <X size={12} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
+              </div>
+
+              {/* Drawer Footer Buttons */}
+              <div className="px-6 py-4 bg-slate-50/90 border-t border-slate-200/80 flex items-center justify-between shrink-0">
+                <div>
+                  {currentStep > 1 && (
+                    <Button type="button" variant="outline" onClick={prevStep}>
+                      Back
+                    </Button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Button type="button" variant="outline" onClick={handleCloseDrawer}>
+                    Cancel
+                  </Button>
+                  {currentStep < 4 ? (
+                    <Button type="button" onClick={nextStep} className="bg-slate-900 hover:bg-slate-800">
+                      Next Step
+                    </Button>
+                  ) : (
+                    <Button
+                      type="submit"
+                      disabled={submitting}
+                      className="bg-slate-900 hover:bg-slate-800 font-semibold px-6 gap-2"
+                    >
+                      {submitting ? <RefreshCw size={14} className="animate-spin" /> : null}
+                      {submitting ? "Saving..." : editingOfferId ? "Save Changes" : "Create Campaign"}
+                    </Button>
+                  )}
+                </div>
+              </div>
             </form>
-
-            {/* Modal Footer Controls */}
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
-              {currentStep > 1 ? (
-                <Button type="button" variant="outline" onClick={prevStep} className="cursor-pointer">Previous</Button>
-              ) : <div />}
-
-              {currentStep < 4 ? (
-                <Button type="button" onClick={nextStep} className="bg-indigo-600 hover:bg-indigo-500 font-bold px-6 cursor-pointer">Next Step</Button>
-              ) : (
-                <Button
-                  type="button"
-                  onClick={handleCreateOrUpdate}
-                  className="bg-indigo-600 hover:bg-indigo-500 font-bold px-6 gap-2 cursor-pointer"
-                  disabled={submitting}
-                >
-                  {submitting ? <RefreshCw size={14} className="animate-spin" /> : null}
-                  {submitting ? "Saving..." : "Save Campaign"}
-                </Button>
-              )}
-            </div>
-
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

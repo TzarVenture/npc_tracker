@@ -46,7 +46,8 @@ import {
   setDefaultDomain
 } from "./db";
 import { authMiddleware, AuthenticatedRequest, getJwtSecret } from "./authMiddleware";
-import { Offer, Click, Conversion, TrackingDomain } from "./src/types";
+import { Offer, Click, Conversion, TrackingDomain, TrackingUrlItem } from "./src/types";
+import { normalizeCountryCode } from "./src/utils/countries";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -300,7 +301,9 @@ app.post("/api/offers", authMiddleware, (req, res) => {
     fallbackUrl: fallbackUrl || destinationUrl,
     payout: Number(payout) || 0,
     revenue: Number(revenue) || 10,
-    geoTargeting: geoTargeting || [],
+    geoTargeting: Array.isArray(geoTargeting)
+      ? geoTargeting.map(normalizeCountryCode).filter(Boolean)
+      : [],
     cityTargeting: cityTargeting || [],
     deviceType: deviceType || "All",
     osType: osType || "All",
@@ -342,7 +345,10 @@ app.put("/api/offers/:id", authMiddleware, (req, res) => {
 
   const updatedOffer: Offer = {
     ...existing,
-    ...req.body
+    ...req.body,
+    geoTargeting: Array.isArray(req.body.geoTargeting)
+      ? req.body.geoTargeting.map(normalizeCountryCode).filter(Boolean)
+      : (existing.geoTargeting || []).map(normalizeCountryCode).filter(Boolean)
   };
 
   const saved = saveOffer(updatedOffer);
@@ -487,7 +493,7 @@ app.get("/api/clicks/export", authMiddleware, (req, res) => {
     "Sub ID 2",
     "Status",
     "Filter Reason",
-    "Revenue ($)"
+    "Revenue (₹)"
   ];
 
   const rows = allClicks.map(c => [
@@ -532,7 +538,7 @@ app.get("/api/publishers", (req, res) => {
   const statsMap = new Map(stats.map((s: any) => [s.id, s]));
   const enriched = registered.map(p => {
     const s = statsMap.get(p.pubId) || { clickCount: 0, passed: 0, filtered: 0, revenue: 0, payout: 0 };
-    return { ...p, ...s, id: p.pubId, name: p.name };
+    return { ...p, ...s, id: p.pubId, pubId: p.pubId, internalId: p.id, name: p.name };
   });
   // Also include pub IDs from click history that are NOT registered
   const registeredIds = new Set(registered.map(p => p.pubId));
@@ -668,74 +674,152 @@ export const resetRotationState = () => {
   offerRotationState.clear();
 };
 
-// Helper to pick destination URL from offer trackingUrls by weight & targeting using SWRR
-export const selectDestinationUrl = (offer: Offer, geo: string, device: string): string => {
-  if (offer.trackingUrls && offer.trackingUrls.length > 0) {
-    const activeUrls = offer.trackingUrls.filter(u => {
-      if (u.status !== "active") return false;
-      if (u.deviceType && u.deviceType !== "All" && u.deviceType !== device) return false;
-      if (u.geoTargeting && u.geoTargeting.length > 0 && !u.geoTargeting.includes(geo)) return false;
-      return true;
-    });
+export interface SelectedLandingPage {
+  id?: string;
+  url: string;
+  name: string;
+  weight: number;
+  deviceType?: string;
+}
 
-    if (activeUrls.length > 0) {
-      if (activeUrls.length === 1) {
-        return activeUrls[0].url;
-      }
+/**
+ * Returns the effective pool of candidate landing pages for an offer.
+ * If offer.trackingUrls has entries, it ensures the primary destinationUrl is included
+ * (unless already explicitly present in trackingUrls).
+ */
+export const getEffectiveRotationPool = (offer: Offer): TrackingUrlItem[] => {
+  const variants = Array.isArray(offer.trackingUrls) ? offer.trackingUrls : [];
+  if (variants.length === 0) {
+    return [{
+      id: "primary",
+      name: "Primary Landing Page",
+      url: offer.destinationUrl,
+      weight: 100,
+      deviceType: "All",
+      status: "active"
+    }];
+  }
 
-      // Retrieve or initialize the state map for this offer
-      let offerState = offerRotationState.get(offer._id);
-      if (!offerState) {
-        offerState = new Map<string, SwrrNodeState>();
-        offerRotationState.set(offer._id, offerState);
-      }
+  // Check if primary is already explicitly present in variants
+  const hasPrimary = variants.some(u => u.id === "primary" || u.url === offer.destinationUrl);
+  if (hasPrimary) {
+    return variants;
+  }
 
-      // Cleanup keys that are no longer active
-      const activeKeys = new Set(activeUrls.map(u => u.id || u.url));
-      for (const k of offerState.keys()) {
-        if (!activeKeys.has(k)) {
-          offerState.delete(k);
-        }
-      }
+  // Calculate default weight for Primary URL as 100 - sum(variants) (min 1)
+  const variantWeightSum = variants.reduce((sum, u) => sum + (Number(u.weight) || 0), 0);
+  const primaryWeight = Math.max(1, 100 - variantWeightSum);
 
-      // Ensure every active URL has a state entry
-      for (const item of activeUrls) {
-        const key = item.id || item.url;
-        if (!offerState.has(key)) {
-          offerState.set(key, { currentWeight: 0 });
-        }
-      }
+  return [
+    {
+      id: "primary",
+      name: "Primary Landing Page",
+      url: offer.destinationUrl,
+      weight: primaryWeight,
+      deviceType: "All",
+      status: "active"
+    },
+    ...variants
+  ];
+};
 
-      const totalWeight = activeUrls.reduce((sum, u) => sum + Math.max(1, Number(u.weight) || 1), 0);
+/**
+ * Helper to pick destination URL from offer trackingUrls by weight & targeting using Smooth Weighted Round-Robin (SWRR)
+ */
+export const selectDestinationWithDetails = (offer: Offer, geo: string, device: string): SelectedLandingPage => {
+  const pool = getEffectiveRotationPool(offer);
+  const normalizedVisitorGeo = normalizeCountryCode(geo);
 
-      // Smooth Weighted Round-Robin (Nginx Algorithm):
-      // 1. For each eligible URL: currentWeight += effectiveWeight
-      // 2. Select the URL with the maximum currentWeight
-      // 3. Deduct totalWeight from the selected URL's currentWeight
-      let bestItem = activeUrls[0];
-      let maxCurrentWeight = -Infinity;
+  const activeUrls = pool.filter(u => {
+    if (u.status && u.status !== "active") return false;
+    if (u.deviceType && u.deviceType !== "All" && u.deviceType !== device) return false;
+    if (u.geoTargeting && u.geoTargeting.length > 0) {
+      const allowed = u.geoTargeting.map(normalizeCountryCode);
+      if (!allowed.includes(normalizedVisitorGeo)) return false;
+    }
+    return true;
+  });
 
-      for (const item of activeUrls) {
-        const key = item.id || item.url;
-        const state = offerState.get(key)!;
-        const effectiveWeight = Math.max(1, Number(item.weight) || 1);
+  if (activeUrls.length === 0) {
+    return {
+      id: "fallback",
+      url: offer.destinationUrl,
+      name: "Primary Landing Page (Fallback)",
+      weight: 100,
+      deviceType: "All"
+    };
+  }
 
-        state.currentWeight += effectiveWeight;
+  if (activeUrls.length === 1) {
+    return {
+      id: activeUrls[0].id,
+      url: activeUrls[0].url,
+      name: activeUrls[0].name || "Landing Page",
+      weight: Number(activeUrls[0].weight) || 100,
+      deviceType: activeUrls[0].deviceType || "All"
+    };
+  }
 
-        if (state.currentWeight > maxCurrentWeight) {
-          maxCurrentWeight = state.currentWeight;
-          bestItem = item;
-        }
-      }
+  // Retrieve or initialize the state map for this offer
+  let offerState = offerRotationState.get(offer._id);
+  if (!offerState) {
+    offerState = new Map<string, SwrrNodeState>();
+    offerRotationState.set(offer._id, offerState);
+  }
 
-      const bestKey = bestItem.id || bestItem.url;
-      const bestState = offerState.get(bestKey)!;
-      bestState.currentWeight -= totalWeight;
-
-      return bestItem.url;
+  // Cleanup keys that are no longer active
+  const activeKeys = new Set(activeUrls.map(u => u.id || u.url));
+  for (const k of offerState.keys()) {
+    if (!activeKeys.has(k)) {
+      offerState.delete(k);
     }
   }
-  return offer.destinationUrl;
+
+  // Ensure every active URL has a state entry
+  for (const item of activeUrls) {
+    const key = item.id || item.url;
+    if (!offerState.has(key)) {
+      offerState.set(key, { currentWeight: 0 });
+    }
+  }
+
+  const totalWeight = activeUrls.reduce((sum, u) => sum + Math.max(1, Number(u.weight) || 1), 0);
+
+  // Smooth Weighted Round-Robin (Nginx Algorithm):
+  // 1. For each eligible URL: currentWeight += effectiveWeight
+  // 2. Select the URL with the maximum currentWeight
+  // 3. Deduct totalWeight from the selected URL's currentWeight
+  let bestItem = activeUrls[0];
+  let maxCurrentWeight = -Infinity;
+
+  for (const item of activeUrls) {
+    const key = item.id || item.url;
+    const state = offerState.get(key)!;
+    const effectiveWeight = Math.max(1, Number(item.weight) || 1);
+
+    state.currentWeight += effectiveWeight;
+
+    if (state.currentWeight > maxCurrentWeight) {
+      maxCurrentWeight = state.currentWeight;
+      bestItem = item;
+    }
+  }
+
+  const bestKey = bestItem.id || bestItem.url;
+  const bestState = offerState.get(bestKey)!;
+  bestState.currentWeight -= totalWeight;
+
+  return {
+    id: bestItem.id,
+    url: bestItem.url,
+    name: bestItem.name || "Landing Page",
+    weight: Number(bestItem.weight) || 1,
+    deviceType: bestItem.deviceType || "All"
+  };
+};
+
+export const selectDestinationUrl = (offer: Offer, geo: string, device: string): string => {
+  return selectDestinationWithDetails(offer, geo, device).url;
 };
 
 
@@ -847,7 +931,7 @@ app.post("/api/simulate", (req, res) => {
 
   const clientIp = ip || "192.168.12.34";
   const geo = getGeoFromIp(clientIp);
-  const clientCountry = country || geo.country;
+  const visitorCountry = normalizeCountryCode(country || geo.country || "US");
   const clientCity = city || geo.city;
   const clientUA = userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
   const { device, os, browser } = parseUA(clientUA);
@@ -855,7 +939,8 @@ app.post("/api/simulate", (req, res) => {
 
   let status: "passed" | "filtered" | "capped" | "blocked" = "passed";
   let filterReason = "";
-  let finalUrl = selectDestinationUrl(offer, clientCountry, device);
+  const selectedDest = selectDestinationWithDetails(offer, visitorCountry, device);
+  let finalUrl = selectedDest.url;
 
   const nowIso = new Date().toISOString();
   const blacklist = getBlacklist();
@@ -881,9 +966,12 @@ app.post("/api/simulate", (req, res) => {
   } else if (offer.duplicateWindowMinutes && offer.duplicateWindowMinutes > 0 && hasRecentClickFromIp(offer._id, clientIp, offer.duplicateWindowMinutes)) {
     status = "filtered";
     filterReason = `Duplicate Click Window Active (${offer.duplicateWindowMinutes} mins)`;
-  } else if (offer.geoTargeting && offer.geoTargeting.length > 0 && !offer.geoTargeting.includes(clientCountry)) {
-    status = "filtered";
-    filterReason = `Country Restricted (Allowed: ${offer.geoTargeting.join(", ")})`;
+  } else if (offer.geoTargeting && offer.geoTargeting.length > 0) {
+    const allowedGeos = offer.geoTargeting.map(normalizeCountryCode).filter(Boolean);
+    if (allowedGeos.length > 0 && !allowedGeos.includes(visitorCountry)) {
+      status = "filtered";
+      filterReason = `Country Restricted (Allowed: ${allowedGeos.join(", ")})`;
+    }
   } else if (offer.cityTargeting && offer.cityTargeting.length > 0 && !offer.cityTargeting.includes(clientCity.toUpperCase())) {
     status = "filtered";
     filterReason = `City Restricted (Allowed: ${offer.cityTargeting.join(", ")})`;
@@ -921,21 +1009,28 @@ app.post("/api/simulate", (req, res) => {
     incrementOfferClickCount(offer._id);
   }
 
+  const simClickId = "click-" + Math.random().toString(36).substring(2, 9);
+
   if (finalUrl !== "BLOCK_ACCESS_DENIED") {
     finalUrl = finalUrl
+      .replace(/{click_id}/g, simClickId)
+      .replace(/{offer_id}/g, offer._id)
       .replace(/{pub_id}/g, pubId || "")
       .replace(/{sub_id1}/g, subId1 || "")
-      .replace(/{sub_id2}/g, subId2 || "");
+      .replace(/{sub_id2}/g, subId2 || "")
+      .replace(/{country}/g, visitorCountry || "")
+      .replace(/{geo}/g, visitorCountry || "")
+      .replace(/{device}/g, device || "");
   }
 
   const newClick: Click = {
-    _id: "click-" + Math.random().toString(36).substring(2, 9),
+    _id: simClickId,
     offerId: offer._id,
     pubId,
     subId1,
     subId2,
     ip: clientIp,
-    country: clientCountry,
+    country: visitorCountry,
     city: clientCity,
     device,
     os,
@@ -989,6 +1084,13 @@ app.post("/api/simulate", (req, res) => {
     originalDest: offer.destinationUrl,
     fallbackDest: offer.fallbackUrl,
     finalDest: finalUrl,
+    selectedLandingPage: {
+      id: selectedDest.id,
+      name: selectedDest.name,
+      url: selectedDest.url,
+      weight: selectedDest.weight,
+      deviceType: selectedDest.deviceType || "All"
+    },
     actionTaken: offer.actionOnFilter,
     referrerAudit,
     click: newClick
@@ -1025,6 +1127,7 @@ const handlePixelTrack = (req: express.Request, res: express.Response) => {
   const userAgentStr = req.headers["user-agent"] || "";
   const ipString = Array.isArray(clientIp) ? clientIp[0] : clientIp;
   const geo = getGeoFromIp(ipString);
+  const visitorCountry = normalizeCountryCode(geo.country || "US");
   const { device, os, browser } = parseUA(userAgentStr);
   const clientIsp = String(isp || "Unknown ISP");
 
@@ -1047,8 +1150,11 @@ const handlePixelTrack = (req: express.Request, res: express.Response) => {
     status = "blocked"; filterReason = "Bot Signature Detected";
   } else if (offer.duplicateWindowMinutes && offer.duplicateWindowMinutes > 0 && hasRecentClickFromIp(offer._id, ipString, offer.duplicateWindowMinutes)) {
     status = "filtered"; filterReason = "Duplicate Click Window Active";
-  } else if (offer.geoTargeting && offer.geoTargeting.length > 0 && !offer.geoTargeting.includes(geo.country)) {
-    status = "filtered"; filterReason = "Geo Restricted";
+  } else if (offer.geoTargeting && offer.geoTargeting.length > 0) {
+    const allowedGeos = offer.geoTargeting.map(normalizeCountryCode).filter(Boolean);
+    if (allowedGeos.length > 0 && !allowedGeos.includes(visitorCountry)) {
+      status = "filtered"; filterReason = "Geo Restricted";
+    }
   } else if (offer.cityTargeting && offer.cityTargeting.length > 0 && !offer.cityTargeting.includes(geo.city.toUpperCase())) {
     status = "filtered"; filterReason = "City Restricted";
   } else if (offer.browserTargeting && offer.browserTargeting.length > 0 && !offer.browserTargeting.includes(browser.toUpperCase())) {
@@ -1075,7 +1181,7 @@ const handlePixelTrack = (req: express.Request, res: express.Response) => {
     subId1: String(sub_id1 || subId1 || ""),
     subId2: String(sub_id2 || subId2 || ""),
     ip: ipString,
-    country: geo.country,
+    country: visitorCountry,
     city: geo.city,
     device, os, browser,
     isp: clientIsp,
@@ -1114,13 +1220,15 @@ app.get("/track", (req, res) => {
   const userAgentStr = req.headers["user-agent"] || "";
   const ipString = Array.isArray(clientIp) ? clientIp[0] : clientIp;
   const geo = getGeoFromIp(ipString);
+  const visitorCountry = normalizeCountryCode(geo.country || "US");
   const { device, os, browser } = parseUA(userAgentStr);
   const clientIsp = "Unknown ISP";
 
   let status: "passed" | "filtered" | "capped" | "blocked" = "passed";
   let filterReason = "";
-  let finalUrl = selectDestinationUrl(offer, geo.country, device);
+  let finalUrl = selectDestinationUrl(offer, visitorCountry, device);
   const sessionId = "sess-" + Math.random().toString(36).substring(2, 9) + Math.random().toString(36).substring(2, 9);
+  const clickId = "click-" + Math.random().toString(36).substring(2, 9) + Math.random().toString(36).substring(2, 9);
   const nowIso = new Date().toISOString();
   const blacklist = getBlacklist();
 
@@ -1145,9 +1253,12 @@ app.get("/track", (req, res) => {
   } else if (offer.duplicateWindowMinutes && offer.duplicateWindowMinutes > 0 && hasRecentClickFromIp(offer._id, ipString, offer.duplicateWindowMinutes)) {
     status = "filtered";
     filterReason = "Duplicate Click Window Active";
-  } else if (offer.geoTargeting && offer.geoTargeting.length > 0 && !offer.geoTargeting.includes(geo.country)) {
-    status = "filtered";
-    filterReason = "Geo Restricted";
+  } else if (offer.geoTargeting && offer.geoTargeting.length > 0) {
+    const allowedGeos = offer.geoTargeting.map(normalizeCountryCode).filter(Boolean);
+    if (allowedGeos.length > 0 && !allowedGeos.includes(visitorCountry)) {
+      status = "filtered";
+      filterReason = "Geo Restricted";
+    }
   } else if (offer.cityTargeting && offer.cityTargeting.length > 0 && !offer.cityTargeting.includes(geo.city.toUpperCase())) {
     status = "filtered";
     filterReason = "City Restricted";
@@ -1176,14 +1287,14 @@ app.get("/track", (req, res) => {
       return res.status(403).send("<h1>Request Dropped</h1>");
     } else if (offer.actionOnFilter === "block") {
       const clickLog: Click = {
-        _id: "click-" + Math.random().toString(36).substring(2, 9),
+        _id: clickId,
         offerId: offer._id,
         sessionId,
         pubId: String(pub_id || ""),
         subId1: String(sub_id1 || ""),
         subId2: String(sub_id2 || ""),
         ip: ipString,
-        country: geo.country,
+        country: visitorCountry,
         city: geo.city,
         device,
         os,
@@ -1207,14 +1318,14 @@ app.get("/track", (req, res) => {
   }
 
   const clickLog: Click = {
-    _id: "click-" + Math.random().toString(36).substring(2, 9),
+    _id: clickId,
     offerId: offer._id,
     sessionId,
     pubId: String(pub_id || ""),
     subId1: String(sub_id1 || ""),
     subId2: String(sub_id2 || ""),
     ip: ipString,
-    country: geo.country,
+    country: visitorCountry,
     city: geo.city,
     device,
     os,
@@ -1230,9 +1341,14 @@ app.get("/track", (req, res) => {
   recordClick(clickLog);
 
   let finalDest = finalUrl
+    .replace(/{click_id}/g, clickId)
+    .replace(/{offer_id}/g, offer._id)
     .replace(/{pub_id}/g, String(pub_id || ""))
     .replace(/{sub_id1}/g, String(sub_id1 || ""))
-    .replace(/{sub_id2}/g, String(sub_id2 || ""));
+    .replace(/{sub_id2}/g, String(sub_id2 || ""))
+    .replace(/{country}/g, visitorCountry || "")
+    .replace(/{geo}/g, visitorCountry || "")
+    .replace(/{device}/g, device || "");
 
   if (!/^https?:\/\//i.test(finalDest)) {
     finalDest = "http://" + finalDest;
