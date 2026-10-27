@@ -115,20 +115,20 @@ export default function Dashboard() {
       const [statsRes, offersRes, perfRes, geoRes, liveRes, globalRes] = await Promise.all([
         axios.get("/api/stats"),
         axios.get("/api/offers"),
-        axios.get("/api/performance/hourly"),
-        axios.get("/api/stats/geo"),
-        axios.get("/api/logs/live"),
+        axios.get("/api/stats/performance"),
+        axios.get("/api/stats/geos"),
+        axios.get("/api/stats/live"),
         axios.get("/api/global-tracking")
       ]);
 
-      setStats(statsRes.data);
-      setOffers(offersRes.data);
-      setPerformanceData(perfRes.data);
-      setGeoData(geoRes.data);
-      setLiveLogs(liveRes.data);
-      setGlobalTracking(globalRes.data.globalTracking);
+      setStats(statsRes?.data || null);
+      setOffers(Array.isArray(offersRes?.data) ? offersRes.data : []);
+      setPerformanceData(Array.isArray(perfRes?.data) ? perfRes.data : []);
+      setGeoData(Array.isArray(geoRes?.data) ? geoRes.data : []);
+      setLiveLogs(Array.isArray(liveRes?.data) ? liveRes.data : []);
+      setGlobalTracking(globalRes?.data?.globalTracking !== false);
 
-      if (offersRes.data.length > 0 && !simFormData.offerId) {
+      if (Array.isArray(offersRes?.data) && offersRes.data.length > 0 && !simFormData.offerId) {
         setSimFormData(prev => ({ ...prev, offerId: offersRes.data[0]._id }));
       }
     } catch (err: any) {
@@ -443,7 +443,7 @@ export default function Dashboard() {
             </div>
           </CardHeader>
           <CardContent className="h-[280px]">
-            {geoData.length === 0 ? (
+            {!Array.isArray(geoData) || geoData.length === 0 ? (
               <div className="flex items-center justify-center h-full text-slate-500 font-medium text-xs">No geo records available</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
@@ -460,7 +460,7 @@ export default function Dashboard() {
                     }}
                   />
                   <Bar dataKey="clicks" radius={[0, 4, 4, 0]}>
-                    {geoData.map((_, index) => (
+                    {(Array.isArray(geoData) ? geoData : []).map((_, index) => (
                       <Cell key={`cell-${index}`} fill={index === 0 ? "#4f46e5" : "#94a3b8"} />
                     ))}
                   </Bar>
@@ -491,14 +491,14 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="text-xs divide-y divide-slate-100">
-                {liveLogs.length === 0 ? (
+                {!Array.isArray(liveLogs) || liveLogs.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-6 py-12 text-center text-slate-500 font-medium text-sm">
                       No click records logged yet.
                     </td>
                   </tr>
                 ) : (
-                  liveLogs.slice(0, 7).map((log) => {
+                  (Array.isArray(liveLogs) ? liveLogs.slice(0, 7) : []).map((log) => {
                     const timeStr = new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
                     return (
                       <tr key={log._id} className="hover:bg-slate-50/50 transition-colors">

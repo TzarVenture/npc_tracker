@@ -443,10 +443,12 @@ app.get("/api/stats", (req, res) => {
   res.json(getDashboardStats());
 });
 
-app.get("/api/stats/live", (req, res) => {
+const handleLiveStats = (req: express.Request, res: express.Response) => {
   const limit = parseInt(req.query.limit as string) || 20;
-  res.json(getClicksPaginated(1, limit).data);
-});
+  res.json(getClicksPaginated(1, limit).data || []);
+};
+app.get("/api/stats/live", handleLiveStats);
+app.get("/api/logs/live", handleLiveStats);
 
 app.get("/api/clicks", (req, res) => {
   const page = parseInt(req.query.page as string) || 1;
@@ -650,13 +652,19 @@ app.delete("/api/blacklist/:ip", authMiddleware, (req, res) => {
   res.json(getBlacklist());
 });
 
-app.get("/api/stats/geos", (req, res) => {
-  res.json(getGeoStats());
-});
+const handleGeoStats = (req: express.Request, res: express.Response) => {
+  res.json(getGeoStats() || []);
+};
+app.get("/api/stats/geos", handleGeoStats);
+app.get("/api/stats/geo", handleGeoStats);
+app.get("/api/logs/geo", handleGeoStats);
 
-app.get("/api/stats/performance", (req, res) => {
-  res.json(getHourlyPerformance());
-});
+const handlePerformanceStats = (req: express.Request, res: express.Response) => {
+  res.json(getHourlyPerformance() || []);
+};
+app.get("/api/stats/performance", handlePerformanceStats);
+app.get("/api/performance/hourly", handlePerformanceStats);
+app.get("/api/stats/hourly", handlePerformanceStats);
 
 // ==========================================
 // DETERMINISTIC SMOOTH WEIGHTED ROUND-ROBIN (SWRR) ROTATION ENGINE
